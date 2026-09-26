@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -78,6 +80,78 @@ def signing_publisher() -> dict[str, str] | None:
     }
 
 
+def external_release(
+    extension_root: pathlib.Path,
+    manifest: dict,
+) -> tuple[pathlib.Path, dict] | None:
+    stem = f"{extension_root.name}-{manifest['version']}"
+    archive = extension_root / "releases" / f"{stem}.zip"
+    metadata_path = extension_root / "releases" / f"{stem}.signature.json"
+    if not archive.exists() and not metadata_path.exists():
+        return None
+    if not archive.is_file() or not metadata_path.is_file():
+        raise SystemExit(
+            f"{extension_root.name} has an incomplete external release."
+        )
+
+    metadata = json.loads(metadata_path.read_text())
+    publisher = metadata.get("publisher")
+    required_publisher_fields = {"id", "name", "keyID", "publicKey"}
+    if (
+        not isinstance(publisher, dict)
+        or not required_publisher_fields.issubset(publisher)
+        or not all(
+            isinstance(publisher[field], str)
+            for field in required_publisher_fields
+        )
+        or not isinstance(metadata.get("signature"), str)
+        or not isinstance(metadata.get("sha256"), str)
+    ):
+        raise SystemExit(
+            f"{metadata_path.name} has incomplete publisher metadata."
+        )
+    try:
+        public_key = base64.b64decode(publisher["publicKey"], validate=True)
+        signature = base64.b64decode(metadata["signature"], validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        raise SystemExit(
+            f"{metadata_path.name} has invalid base64 signing metadata."
+        )
+    if len(public_key) != 32 or len(signature) != 64:
+        raise SystemExit(
+            f"{metadata_path.name} has invalid Ed25519 signing metadata."
+        )
+
+    archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if archive_digest != metadata["sha256"].lower():
+        raise SystemExit(
+            f"{archive.name} does not match its signed SHA-256 checksum."
+        )
+    fingerprint = metadata.get("publicKeyFingerprintSHA256")
+    if (
+        fingerprint is not None
+        and (
+            not isinstance(fingerprint, str)
+            or hashlib.sha256(public_key).hexdigest() != fingerprint.lower()
+        )
+    ):
+        raise SystemExit(
+            f"{metadata_path.name} has an invalid public-key fingerprint."
+        )
+    subprocess.run(
+        [
+            "swift",
+            str(SIGNING_SCRIPT),
+            "verify",
+            str(archive),
+            publisher["publicKey"],
+            metadata["signature"],
+        ],
+        check=True,
+    )
+    return archive, metadata
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build and sign Vehla Store catalog packages."
@@ -147,7 +221,8 @@ def main() -> None:
         package_id = manifest["id"]
         version = manifest["version"]
         runtime = manifest.get("runtime", "node")
-        if runtime != "node" and publisher is None:
+        signed_release = external_release(extension_root, manifest)
+        if runtime != "node" and publisher is None and signed_release is None:
             raise SystemExit(
                 f"{extension_root.name} is native and requires publisher signing."
             )
@@ -194,8 +269,42 @@ def main() -> None:
                     f"{extension_root.name} did not build an executable entrypoint."
                 )
 
+        if signed_release is not None:
+            signed_release = external_release(extension_root, manifest)
+            if signed_release is None:
+                raise SystemExit(
+                    f"{extension_root.name} removed its external release while building."
+                )
+
         archive = PACKAGES / f"{extension_root.name}-{version}.zip"
-        if archive.exists():
+        if signed_release is not None:
+            signed_archive, _ = signed_release
+            if archive.exists() and archive.read_bytes() != signed_archive.read_bytes():
+                raise SystemExit(
+                    f"{archive.name} already exists with different signed bytes."
+                )
+            if not archive.exists():
+                shutil.copyfile(signed_archive, archive)
+            with tempfile.TemporaryDirectory() as temporary:
+                extracted = pathlib.Path(temporary)
+                subprocess.run(
+                    ["/usr/bin/ditto", "-x", "-k", str(archive), str(extracted)],
+                    check=True,
+                )
+                archived_manifest = (
+                    extracted
+                    / extension_root.name
+                    / "extension.json"
+                )
+                if (
+                    not archived_manifest.is_file()
+                    or json.loads(archived_manifest.read_text()) != manifest
+                ):
+                    raise SystemExit(
+                        f"{archive.name} does not contain the catalog manifest "
+                        f"under {extension_root.name}."
+                    )
+        elif archive.exists():
             with tempfile.TemporaryDirectory() as temporary:
                 extracted = pathlib.Path(temporary)
                 subprocess.run(
@@ -239,7 +348,11 @@ def main() -> None:
             "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
             "archiveRoot": extension_root.name,
         }
-        if publisher is not None:
+        if signed_release is not None:
+            _, metadata = signed_release
+            catalog_package["publisher"] = metadata["publisher"]
+            catalog_package["signature"] = metadata["signature"]
+        elif publisher is not None:
             existing = existing_packages.get(
                 (package_id, version, catalog_package["sha256"])
             )

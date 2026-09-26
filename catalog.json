@@ -1288,6 +1288,50 @@
     },
     {
       "manifest": {
+        "apiVersion": 3,
+        "id": "com.ibuhs.vehla.research",
+        "name": "Research",
+        "version": "1.0.0",
+        "description": "Save articles to a personal reading queue, organize collections, and resume cached text beside the Dock.",
+        "author": "0xdarkkernel",
+        "runtime": "dockWidget",
+        "entrypoint": "bin/ResearchDockWidget.bundle",
+        "capabilities": [
+          "persistentStorage",
+          "clipboardRead",
+          "clipboardWrite",
+          "openURL",
+          "networkAccess"
+        ],
+        "dockWidgets": [
+          {
+            "id": "research",
+            "title": "Research",
+            "subtitle": "Your reading queue",
+            "systemImage": "books.vertical",
+            "preferredPopupWidth": 760,
+            "preferredPopupHeight": 800,
+            "supportedSurfaces": [
+              "compact",
+              "inline",
+              "popup"
+            ]
+          }
+        ]
+      },
+      "archiveURL": "https://raw.githubusercontent.com/ibuhs/vehla-extensions/main/packages/research-dock-widget-1.0.0.zip",
+      "sha256": "e8a0f07b7c376f5c74a4c1bdbe147b6e4ff44d00b73980268e43829550c4b6f2",
+      "archiveRoot": "research-dock-widget",
+      "publisher": {
+        "id": "com.0xdarkkernel.publisher",
+        "keyID": "release-2026-09",
+        "name": "0xdarkkernel",
+        "publicKey": "PXFv8wNTyjdThFfGtILeAaY/xTKo6noi2obbf8QtKAI="
+      },
+      "signature": "OCQoxah+Kz3YjIx43wrN5GL07Jpktwe00O3YFaCTMFTFwYz80+ZbXh0wDztNssuq0SDDMXMPXhP4KpGm6XwsDQ=="
+    },
+    {
+      "manifest": {
         "apiVersion": 1,
         "id": "com.vehla.examples.swift-hello",
         "name": "Swift Hello",

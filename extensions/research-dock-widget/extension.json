@@ -1,0 +1,32 @@
+{
+  "apiVersion": 3,
+  "id": "com.ibuhs.vehla.research",
+  "name": "Research",
+  "version": "1.0.0",
+  "description": "Save articles to a personal reading queue, organize collections, and resume cached text beside the Dock.",
+  "author": "0xdarkkernel",
+  "runtime": "dockWidget",
+  "entrypoint": "bin/ResearchDockWidget.bundle",
+  "capabilities": [
+    "persistentStorage",
+    "clipboardRead",
+    "clipboardWrite",
+    "openURL",
+    "networkAccess"
+  ],
+  "dockWidgets": [
+    {
+      "id": "research",
+      "title": "Research",
+      "subtitle": "Your reading queue",
+      "systemImage": "books.vertical",
+      "preferredPopupWidth": 760,
+      "preferredPopupHeight": 800,
+      "supportedSurfaces": [
+        "compact",
+        "inline",
+        "popup"
+      ]
+    }
+  ]
+}

@@ -7,16 +7,19 @@ enum SigningError: Error, CustomStringConvertible {
     case usage
     case missingPrivateKey
     case invalidPrivateKey
+    case invalidSignature
     case unreadableArchive
 
     var description: String {
         switch self {
         case .usage:
-            return "Usage: publisher-signing.swift generate | public-key | sign <archive>"
+            return "Usage: publisher-signing.swift generate | public-key | sign <archive> | verify <archive> <public-key> <signature>"
         case .missingPrivateKey:
             return "VEHLA_PUBLISHER_PRIVATE_KEY is required."
         case .invalidPrivateKey:
             return "VEHLA_PUBLISHER_PRIVATE_KEY must be a base64-encoded Ed25519 private key."
+        case .invalidSignature:
+            return "The Ed25519 public key or archive signature is invalid."
         case .unreadableArchive:
             return "The archive could not be read."
         }
@@ -68,6 +71,20 @@ do {
             throw SigningError.unreadableArchive
         }
         print(try key.signature(for: archive).base64EncodedString())
+    case "verify":
+        guard CommandLine.arguments.count == 5,
+              let archive = FileManager.default.contents(
+                  atPath: CommandLine.arguments[2]
+              ),
+              let publicKeyData = Data(base64Encoded: CommandLine.arguments[3]),
+              let signature = Data(base64Encoded: CommandLine.arguments[4]),
+              let publicKey = try? Curve25519.Signing.PublicKey(
+                  rawRepresentation: publicKeyData
+              ),
+              publicKey.isValidSignature(signature, for: archive) else {
+            throw SigningError.invalidSignature
+        }
+        print("Signature valid")
     default:
         throw SigningError.usage
     }

@@ -1373,6 +1373,26 @@ Users can revoke a remembered key from the installed package’s menu with **For
 
 For CI, store `VEHLA_PUBLISHER_PRIVATE_KEY` as an encrypted repository or organization secret. Keep the non-secret publisher ID, name, and key ID in protected workflow configuration. Restrict release workflow approval and secret access to trusted maintainers.
 
+### Publish an externally signed package
+
+Third-party publishers keep their private keys and sign their own immutable
+archive. Place both files under the extension source directory:
+
+```text
+releases/<directory>-<version>.zip
+releases/<directory>-<version>.signature.json
+```
+
+The signature JSON must contain `sha256`, `signature`, and a `publisher` object
+with `id`, `name`, `keyID`, and `publicKey`. It may also contain
+`publicKeyFingerprintSHA256`. The archive must use the extension directory name
+as its root and contain an `extension.json` identical to the source manifest.
+
+The catalog builder verifies the checksum, fingerprint, Ed25519 signature, and
+archived manifest. It then copies the archive byte-for-byte into `packages/`
+and preserves the external publisher identity in `catalog.json`. It never
+needs or accepts the publisher’s private key.
+
 Before publishing:
 
 ```sh
