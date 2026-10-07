@@ -566,11 +566,19 @@ final class InlineTextView: NSTextView {
         return true
     }
 
-    /// Vehla has no Edit menu, so the editor handles its own shortcuts.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), shortcut(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Route widget commands explicitly: NSHostingView shortcut registration is
+    /// not reliable inside the host's nonactivating popup panels.
     private func shortcut(_ event: NSEvent) -> Bool {
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "\r":
             if let span = spans.first(where: { $0.kind == "link" && NSLocationInRange(selectedRange().location, $0.range) }), let url = span.url { onOpenURL(url) }
+        case "n": return onCommand("/new")
+        case "f": return onCommand("/search")
         case "s": onSave?()
         case "[": onNavigate(1)
         case "]": onNavigate(-1)

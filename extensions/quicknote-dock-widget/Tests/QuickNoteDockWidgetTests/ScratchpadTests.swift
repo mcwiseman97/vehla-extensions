@@ -232,6 +232,19 @@ import VehlaDockWidgetSDK
         view.detach()
     }
 
+    @Test func nativeCommandShortcutsRouteThroughTheWidget() throws {
+        let view = InlineTextView(usingTextLayoutManager: false)
+        var commands: [String] = []
+        view.onCommand = { commands.append($0); return true }
+        for key in ["n", "f"] {
+            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                timestamp: 0, windowNumber: 0, context: nil, characters: key, charactersIgnoringModifiers: key,
+                isARepeat: false, keyCode: 0))
+            #expect(view.performKeyEquivalent(with: event))
+        }
+        #expect(commands == ["/new", "/search"])
+        view.detach()
+    }
     @Test func slashCommandsAndCheckTriggerUseNativeEdits() {
         let view = InlineTextView(usingTextLayoutManager: false)
         view.allowsUndo = true
