@@ -39,7 +39,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>
     <string>AntinoteDockWidget</string>
     <key>CFBundleIdentifier</key>
-    <string>com.ibuhs.vehla.antinote.bundle</string>
+    <string>com.wiseman.vehla.antinote.bundle</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

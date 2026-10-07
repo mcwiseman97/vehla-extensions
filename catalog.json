@@ -4,11 +4,11 @@
     {
       "manifest": {
         "apiVersion": 3,
-        "id": "com.ibuhs.vehla.antinote",
+        "id": "com.wiseman.vehla.antinote",
         "name": "Antinote Dock Widget",
         "version": "1.1.1",
         "description": "Read and edit Antinote notes beside the Dock.",
-        "author": "ibuhs",
+        "author": "Michael Wiseman",
         "runtime": "dockWidget",
         "entrypoint": "bin/AntinoteDockWidget.bundle",
         "capabilities": [
@@ -32,7 +32,7 @@
         ]
       },
       "archiveURL": "https://raw.githubusercontent.com/ibuhs/vehla-extensions/main/packages/antinote-dock-widget-1.1.1.zip",
-      "sha256": "d6a45b63bd15dc8312f3d6d71b2d44112b7810f6cfa86c1cc2cbb0a125883c28",
+      "sha256": "cfe28e5c729359df711b2841d08d7e440396c281ff83794a99a709c8384aee3b",
       "archiveRoot": "antinote-dock-widget",
       "publisher": {
         "id": "com.wiseman.publisher",
@@ -40,7 +40,7 @@
         "name": "Michael Wiseman",
         "publicKey": "nmRkk5loQ0WZxoSG9o4bvERGEseRT5k/tIybSlY2j14="
       },
-      "signature": "MVG+HdogKTVwKnKKqcJK3FKz9NG8ZY/BSEFwaqbro2Sn1yfZdqaxDs7e65v9UQscBqA4fjbdmE4dYM5quXmSBg=="
+      "signature": "xkId/r9zdsMVHbZFc/p5OJCpiT8Ixn0Mg5boemVlQDH+QinVxr75gw7hj03SmiB/4UpU4p1AHgWIJh5E6P2ZAA=="
     },
     {
       "manifest": {

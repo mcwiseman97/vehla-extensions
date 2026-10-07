@@ -1,10 +1,10 @@
 {
   "apiVersion": 3,
-  "id": "com.ibuhs.vehla.antinote",
+  "id": "com.wiseman.vehla.antinote",
   "name": "Antinote Dock Widget",
   "version": "1.1.1",
   "description": "Read and edit Antinote notes beside the Dock.",
-  "author": "ibuhs",
+  "author": "Michael Wiseman",
   "runtime": "dockWidget",
   "entrypoint": "bin/AntinoteDockWidget.bundle",
   "capabilities": ["persistentStorage", "openURL"],
