@@ -1,0 +1,11 @@
+{
+  "publicKeyFingerprintSHA256": "56b2149c50ae60489722f1bee054185e57056e217c60b5eee87f3a2fd0dc1b0d",
+  "publisher": {
+    "id": "com.wiseman.publisher",
+    "keyID": "release-2026-10",
+    "name": "Michael Wiseman",
+    "publicKey": "nmRkk5loQ0WZxoSG9o4bvERGEseRT5k/tIybSlY2j14="
+  },
+  "sha256": "d6a45b63bd15dc8312f3d6d71b2d44112b7810f6cfa86c1cc2cbb0a125883c28",
+  "signature": "MVG+HdogKTVwKnKKqcJK3FKz9NG8ZY/BSEFwaqbro2Sn1yfZdqaxDs7e65v9UQscBqA4fjbdmE4dYM5quXmSBg=="
+}
