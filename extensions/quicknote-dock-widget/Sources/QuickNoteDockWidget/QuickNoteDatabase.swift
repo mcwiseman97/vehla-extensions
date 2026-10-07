@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-enum AntinoteDatabaseError: LocalizedError, Equatable, Sendable {
+enum QuickNoteDatabaseError: LocalizedError, Equatable, Sendable {
     case missing
     case permission(String)
     case unsupported(String)
@@ -24,13 +24,13 @@ enum AntinoteDatabaseError: LocalizedError, Equatable, Sendable {
     }
 }
 
-enum AntinoteSaveResult: Equatable, Sendable {
+enum QuickNoteSaveResult: Equatable, Sendable {
     case saved(modified: Date?)
     case conflict(current: String)
     case missingNote
 }
 
-struct AntinoteCandidate: Equatable {
+struct QuickNoteCandidate: Equatable {
     enum Kind: Equatable {
         case stable
         case legacy
@@ -40,7 +40,7 @@ struct AntinoteCandidate: Equatable {
     var kind: Kind
 }
 
-struct AntinoteNote: Identifiable, Equatable, Sendable {
+struct QuickNoteNote: Identifiable, Equatable, Sendable {
     var id: String
     var content: String
     var created: Date?
@@ -72,14 +72,14 @@ struct AntinoteNote: Identifiable, Equatable, Sendable {
     }
 }
 
-struct AntinoteLibrary: Equatable, Sendable {
-    var notes: [AntinoteNote]
+struct QuickNoteLibrary: Equatable, Sendable {
+    var notes: [QuickNoteNote]
     var canEdit: Bool
     var editBlock: String?
     var sourceName: String
 }
 
-enum AntinoteLinks {
+enum QuickNoteLinks {
     static func createNote(content: String) -> URL? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -117,13 +117,13 @@ enum AntinoteLinks {
     }
 }
 
-enum AntinoteDatabase {
+enum QuickNoteDatabase {
     static let contentLimit = 2_000_000
 
-    static func candidates(home: URL) -> [AntinoteCandidate] {
+    static func candidates(home: URL) -> [QuickNoteCandidate] {
         let containers = home.appendingPathComponent("Library/Containers", isDirectory: true)
-        func file(_ bundle: String, _ relative: String, kind: AntinoteCandidate.Kind) -> AntinoteCandidate {
-            AntinoteCandidate(
+        func file(_ bundle: String, _ relative: String, kind: QuickNoteCandidate.Kind) -> QuickNoteCandidate {
+            QuickNoteCandidate(
                 url: containers.appendingPathComponent("\(bundle)/Data/\(relative)"),
                 kind: kind
             )
@@ -142,7 +142,7 @@ enum AntinoteDatabase {
         modified: (URL) -> Date? = {
             (try? FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate]) as? Date
         }
-    ) -> AntinoteCandidate? {
+    ) -> QuickNoteCandidate? {
         let found = candidates(home: home).filter { exists($0.url) }
         let stable = found.filter { $0.kind == .stable }
         let pool = stable.isEmpty ? found : stable
@@ -231,9 +231,9 @@ enum AntinoteDatabase {
         return discovery
     }
 
-    static func load(_ url: URL) throws -> AntinoteLibrary {
+    static func load(_ url: URL) throws -> QuickNoteLibrary {
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw AntinoteDatabaseError.missing
+            throw QuickNoteDatabaseError.missing
         }
         let database = try SQLiteDB(url: url, writing: false)
         defer { database.close() }
@@ -244,7 +244,7 @@ enum AntinoteDatabase {
         if tables.contains("ZNOTE") {
             return try loadLegacy(database, sourceName: url.lastPathComponent)
         }
-        throw AntinoteDatabaseError.unsupported(
+        throw QuickNoteDatabaseError.unsupported(
             "\(url.lastPathComponent) does not contain an Antinote notes table this widget recognizes."
         )
     }
@@ -255,12 +255,12 @@ enum AntinoteDatabase {
         content: String,
         baseline: String,
         now: Date = Date()
-    ) throws -> AntinoteSaveResult {
+    ) throws -> QuickNoteSaveResult {
         if content.utf8.count > contentLimit {
-            throw AntinoteDatabaseError.unsupported("This note is too large to save from the Dock.")
+            throw QuickNoteDatabaseError.unsupported("This note is too large to save from the Dock.")
         }
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw AntinoteDatabaseError.missing
+            throw QuickNoteDatabaseError.missing
         }
         let database = try SQLiteDB(url: url, writing: true)
         defer { database.close() }
@@ -270,7 +270,7 @@ enum AntinoteDatabase {
         }
         let columns = try noteColumns(database)
         guard columns.canEdit else {
-            throw AntinoteDatabaseError.unsupported(
+            throw QuickNoteDatabaseError.unsupported(
                 columns.editBlock ?? "This Antinote database can be read here, but not edited."
             )
         }
@@ -285,7 +285,7 @@ enum AntinoteDatabase {
                 try database.execute("ROLLBACK")
                 return .conflict(current: row.content)
             }
-            let modified = AntinoteTimestamp.stored(now, like: row.modifiedRaw)
+            let modified = QuickNoteTimestamp.stored(now, like: row.modifiedRaw)
             try database.updateNote(
                 columns: columns,
                 id: noteID,
@@ -294,20 +294,20 @@ enum AntinoteDatabase {
             )
             guard database.changedRows == 1 else {
                 try database.execute("ROLLBACK")
-                throw AntinoteDatabaseError.sqlite("The note was not updated.")
+                throw QuickNoteDatabaseError.sqlite("The note was not updated.")
             }
             try database.execute("COMMIT")
-            return .saved(modified: modified.flatMap(AntinoteTimestamp.date(from:)))
+            return .saved(modified: modified.flatMap(QuickNoteTimestamp.date(from:)))
         } catch {
             try? database.execute("ROLLBACK")
             throw error
         }
     }
 
-    private static func loadNotes(_ database: SQLiteDB, sourceName: String) throws -> AntinoteLibrary {
+    private static func loadNotes(_ database: SQLiteDB, sourceName: String) throws -> QuickNoteLibrary {
         let columns = try noteColumns(database)
         let notes = try database.notes(columns: columns)
-        return AntinoteLibrary(
+        return QuickNoteLibrary(
             notes: notes,
             canEdit: columns.canEdit,
             editBlock: columns.editBlock,
@@ -315,16 +315,16 @@ enum AntinoteDatabase {
         )
     }
 
-    private static func loadLegacy(_ database: SQLiteDB, sourceName: String) throws -> AntinoteLibrary {
+    private static func loadLegacy(_ database: SQLiteDB, sourceName: String) throws -> QuickNoteLibrary {
         let info = try database.columnInfo("ZNOTE")
         let names = Set(info.map(\.name))
         guard names.contains("ZCONTENT"), names.contains("ZID") else {
-            throw AntinoteDatabaseError.unsupported("The Antinote database has no note text column.")
+            throw QuickNoteDatabaseError.unsupported("The Antinote database has no note text column.")
         }
         let contentType = try database.storageType(table: "ZNOTE", column: "ZCONTENT")
         let editable = contentType == nil || contentType == "text" || contentType == "null"
         let notes = try database.legacyNotes(available: names)
-        return AntinoteLibrary(
+        return QuickNoteLibrary(
             notes: notes,
             canEdit: editable,
             editBlock: editable ? nil : "Note text is not stored as text, so this widget will not change it.",
@@ -336,10 +336,10 @@ enum AntinoteDatabase {
         let info = try database.columnInfo("notes")
         let byName = Dictionary(uniqueKeysWithValues: info.map { ($0.name.lowercased(), $0) })
         guard let id = byName["id"], let content = byName["content"] else {
-            throw AntinoteDatabaseError.unsupported("The notes table is missing id or content.")
+            throw QuickNoteDatabaseError.unsupported("The notes table is missing id or content.")
         }
         guard quote(id.name) != nil, quote(content.name) != nil else {
-            throw AntinoteDatabaseError.unsupported("The notes table uses column names this widget will not write.")
+            throw QuickNoteDatabaseError.unsupported("The notes table uses column names this widget will not write.")
         }
         let modified = ["lastmodified", "modified", "updatedat", "updated"].compactMap { byName[$0] }.first
         let created = ["created", "createdat", "creationdate"].compactMap { byName[$0] }.first
@@ -389,7 +389,7 @@ enum AntinoteDatabase {
     }
 }
 
-enum AntinoteTimestamp {
+enum QuickNoteTimestamp {
     static func date(from value: SQLValue) -> Date? {
         switch value {
         case .text(let text):
@@ -559,14 +559,14 @@ private final class SQLiteDB {
     }
 
     func count(_ table: String) throws -> Int {
-        guard let quoted = AntinoteDatabase.quote(table) else { return 0 }
+        guard let quoted = QuickNoteDatabase.quote(table) else { return 0 }
         let rows = try queryRows("SELECT COUNT(*) FROM \(quoted)")
         return rows.first?.first.flatMap { Int($0) } ?? 0
     }
 
     func columnInfo(_ table: String) throws -> [ColumnInfo] {
-        guard let quoted = AntinoteDatabase.quote(table) else {
-            throw AntinoteDatabaseError.unsupported("Refusing to inspect table \(table).")
+        guard let quoted = QuickNoteDatabase.quote(table) else {
+            throw QuickNoteDatabaseError.unsupported("Refusing to inspect table \(table).")
         }
         var statement: OpaquePointer?
         try prepare("PRAGMA table_info(\(quoted))", statement: &statement)
@@ -580,8 +580,8 @@ private final class SQLiteDB {
     }
 
     func sampleTypes(id: String, content: String) throws -> SampleTypes {
-        guard let idName = AntinoteDatabase.quote(id), let contentName = AntinoteDatabase.quote(content) else {
-            throw AntinoteDatabaseError.unsupported("Refusing to read note columns.")
+        guard let idName = QuickNoteDatabase.quote(id), let contentName = QuickNoteDatabase.quote(content) else {
+            throw QuickNoteDatabaseError.unsupported("Refusing to read note columns.")
         }
         let sql = "SELECT typeof(\(idName)), typeof(\(contentName)) FROM notes LIMIT 1"
         var statement: OpaquePointer?
@@ -592,13 +592,13 @@ private final class SQLiteDB {
         return SampleTypes(idType: text(statement, 0), contentType: text(statement, 1))
     }
 
-    func notes(columns: NoteColumns) throws -> [AntinoteNote] {
-        guard let id = AntinoteDatabase.quote(columns.id),
-              let content = AntinoteDatabase.quote(columns.content)
-        else { throw AntinoteDatabaseError.unsupported("Refusing to read note columns.") }
+    func notes(columns: NoteColumns) throws -> [QuickNoteNote] {
+        guard let id = QuickNoteDatabase.quote(columns.id),
+              let content = QuickNoteDatabase.quote(columns.content)
+        else { throw QuickNoteDatabaseError.unsupported("Refusing to read note columns.") }
         var fields = ["\(id)", "\(content)"]
         func append(_ name: String?) -> Bool {
-            guard let name, let quoted = AntinoteDatabase.quote(name) else { return false }
+            guard let name, let quoted = QuickNoteDatabase.quote(name) else { return false }
             fields.append(quoted)
             return true
         }
@@ -608,44 +608,44 @@ private final class SQLiteDB {
         let hasSlotted = append(columns.slotted)
         var sql = "SELECT \(fields.joined(separator: ", ")) FROM notes"
         var filters: [String] = []
-        if let deleted = columns.deleted, let quoted = AntinoteDatabase.quote(deleted) {
+        if let deleted = columns.deleted, let quoted = QuickNoteDatabase.quote(deleted) {
             filters.append("(\(quoted) IS NULL OR \(quoted) = 0)")
         }
         if !filters.isEmpty {
             sql += " WHERE " + filters.joined(separator: " AND ")
         }
-        if hasModified, let modified = columns.modified, let quoted = AntinoteDatabase.quote(modified) {
+        if hasModified, let modified = columns.modified, let quoted = QuickNoteDatabase.quote(modified) {
             sql += " ORDER BY \(quoted) DESC"
         }
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         guard let statement else { return [] }
         defer { sqlite3_finalize(statement) }
-        var notes: [AntinoteNote] = []
+        var notes: [QuickNoteNote] = []
         var totalBytes = 0
         while try step(statement) {
             try Task.checkCancellation()
             var index: Int32 = 2
-            let created = hasCreated ? AntinoteTimestamp.date(from: value(statement, index)) : nil
+            let created = hasCreated ? QuickNoteTimestamp.date(from: value(statement, index)) : nil
             if hasCreated { index += 1 }
-            let modified = hasModified ? AntinoteTimestamp.date(from: value(statement, index)) : nil
+            let modified = hasModified ? QuickNoteTimestamp.date(from: value(statement, index)) : nil
             if hasModified { index += 1 }
             let slotIndex = hasSlot ? int(statement, index) : nil
             if hasSlot { index += 1 }
             let slotted = hasSlotted ? int(statement, index) : 1
             let slot = slotted == 0 ? nil : slotIndex
             totalBytes += Int(sqlite3_column_bytes(statement, 1))
-            guard totalBytes <= 100 * 1_024 * 1_024 else { throw AntinoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
-            guard sqlite3_column_bytes(statement, 1) <= AntinoteDatabase.contentLimit else {
-                throw AntinoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
+            guard totalBytes <= 100 * 1_024 * 1_024 else { throw QuickNoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
+            guard sqlite3_column_bytes(statement, 1) <= QuickNoteDatabase.contentLimit else {
+                throw QuickNoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
             }
-            guard notes.count < 50_000 else { throw AntinoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
+            guard notes.count < 50_000 else { throw QuickNoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
             guard [SQLITE_TEXT, SQLITE_NULL].contains(sqlite3_column_type(statement, 1)) else {
-                throw AntinoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
+                throw QuickNoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
             }
             let noteID = sqlite3_column_type(statement, 0) == SQLITE_INTEGER ? text(statement, 0) : identifier(statement, 0)
-            guard let noteID, !noteID.isEmpty else { throw AntinoteDatabaseError.unsupported("An Antinote note has an unsupported identifier.") }
-            notes.append(AntinoteNote(
+            guard let noteID, !noteID.isEmpty else { throw QuickNoteDatabaseError.unsupported("An Antinote note has an unsupported identifier.") }
+            notes.append(QuickNoteNote(
                 id: noteID,
                 content: text(statement, 1),
                 created: created,
@@ -656,7 +656,7 @@ private final class SQLiteDB {
         return notes
     }
 
-    func legacyNotes(available: Set<String>) throws -> [AntinoteNote] {
+    func legacyNotes(available: Set<String>) throws -> [QuickNoteNote] {
         var sql = "SELECT ZID, ZCONTENT"
         let hasCreated = available.contains("ZCREATED")
         let hasModified = available.contains("ZLASTMODIFIED")
@@ -675,29 +675,29 @@ private final class SQLiteDB {
         try prepare(sql, statement: &statement)
         guard let statement else { return [] }
         defer { sqlite3_finalize(statement) }
-        var notes: [AntinoteNote] = []
+        var notes: [QuickNoteNote] = []
         var totalBytes = 0
         while try step(statement) {
             try Task.checkCancellation()
             guard let id = identifier(statement, 0) else { continue }
             var index: Int32 = 2
-            let created = hasCreated ? AntinoteTimestamp.date(from: value(statement, index)) : nil
+            let created = hasCreated ? QuickNoteTimestamp.date(from: value(statement, index)) : nil
             if hasCreated { index += 1 }
-            let modified = hasModified ? AntinoteTimestamp.date(from: value(statement, index)) : nil
+            let modified = hasModified ? QuickNoteTimestamp.date(from: value(statement, index)) : nil
             if hasModified { index += 1 }
             let slotIndex = hasSlot ? int(statement, index) : nil
             if hasSlot { index += 1 }
             let slotted = hasSlotted ? int(statement, index) : 1
             totalBytes += Int(sqlite3_column_bytes(statement, 1))
-            guard totalBytes <= 100 * 1_024 * 1_024 else { throw AntinoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
-            guard sqlite3_column_bytes(statement, 1) <= AntinoteDatabase.contentLimit else {
-                throw AntinoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
+            guard totalBytes <= 100 * 1_024 * 1_024 else { throw QuickNoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
+            guard sqlite3_column_bytes(statement, 1) <= QuickNoteDatabase.contentLimit else {
+                throw QuickNoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
             }
-            guard notes.count < 50_000 else { throw AntinoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
+            guard notes.count < 50_000 else { throw QuickNoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
             guard [SQLITE_TEXT, SQLITE_NULL].contains(sqlite3_column_type(statement, 1)) else {
-                throw AntinoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
+                throw QuickNoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
             }
-            notes.append(AntinoteNote(
+            notes.append(QuickNoteNote(
                 id: id,
                 content: text(statement, 1),
                 created: created,
@@ -709,11 +709,11 @@ private final class SQLiteDB {
     }
 
     func noteRow(columns: NoteColumns, id: String) throws -> StoredRow? {
-        guard let idName = AntinoteDatabase.quote(columns.id),
-              let contentName = AntinoteDatabase.quote(columns.content)
-        else { throw AntinoteDatabaseError.unsupported("Refusing to read this note.") }
+        guard let idName = QuickNoteDatabase.quote(columns.id),
+              let contentName = QuickNoteDatabase.quote(columns.content)
+        else { throw QuickNoteDatabaseError.unsupported("Refusing to read this note.") }
         let modifiedSQL: String
-        if let modified = columns.modified, let quoted = AntinoteDatabase.quote(modified) {
+        if let modified = columns.modified, let quoted = QuickNoteDatabase.quote(modified) {
             modifiedSQL = quoted
         } else {
             modifiedSQL = "NULL"
@@ -731,12 +731,12 @@ private final class SQLiteDB {
     }
 
     func updateNote(columns: NoteColumns, id: String, content: String, modified: SQLValue?) throws {
-        guard let idName = AntinoteDatabase.quote(columns.id),
-              let contentName = AntinoteDatabase.quote(columns.content)
-        else { throw AntinoteDatabaseError.unsupported("Refusing to write this note.") }
+        guard let idName = QuickNoteDatabase.quote(columns.id),
+              let contentName = QuickNoteDatabase.quote(columns.content)
+        else { throw QuickNoteDatabaseError.unsupported("Refusing to write this note.") }
         var assignments = ["\(contentName) = ?"]
         let writeModified = modified != nil && modified != .null
-        if writeModified, let modifiedName = columns.modified, let quoted = AntinoteDatabase.quote(modifiedName) {
+        if writeModified, let modifiedName = columns.modified, let quoted = QuickNoteDatabase.quote(modifiedName) {
             assignments.append("\(quoted) = ?")
         }
         var statement: OpaquePointer?
@@ -757,8 +757,8 @@ private final class SQLiteDB {
     }
 
     func storageType(table: String, column: String) throws -> String? {
-        guard let tableName = AntinoteDatabase.quote(table),
-              let columnName = AntinoteDatabase.quote(column)
+        guard let tableName = QuickNoteDatabase.quote(table),
+              let columnName = QuickNoteDatabase.quote(column)
         else { return nil }
         var statement: OpaquePointer?
         try prepare(
@@ -772,10 +772,10 @@ private final class SQLiteDB {
         return kind.isEmpty ? nil : kind
     }
 
-    func updateLegacyNote(id: String, content: String, baseline: String, now: Date) throws -> AntinoteSaveResult {
+    func updateLegacyNote(id: String, content: String, baseline: String, now: Date) throws -> QuickNoteSaveResult {
         let names = Set(try columnInfo("ZNOTE").map(\.name))
         guard names.contains("ZID"), names.contains("ZCONTENT") else {
-            throw AntinoteDatabaseError.unsupported("This Antinote database has no editable note text.")
+            throw QuickNoteDatabaseError.unsupported("This Antinote database has no editable note text.")
         }
         let idType = try storageType(table: "ZNOTE", column: "ZID")
         try execute("BEGIN IMMEDIATE")
@@ -806,7 +806,7 @@ private final class SQLiteDB {
                 return .missingNote
             }
             try execute("COMMIT")
-            return .saved(modified: modified.flatMap(AntinoteTimestamp.date(from:)))
+            return .saved(modified: modified.flatMap(QuickNoteTimestamp.date(from:)))
         } catch {
             try? execute("ROLLBACK")
             throw error
@@ -865,7 +865,7 @@ private final class SQLiteDB {
 
     private func legacyModifiedValue(_ date: Date, like sample: SQLValue, available: Bool) -> SQLValue? {
         guard available else { return nil }
-        if let stored = AntinoteTimestamp.stored(date, like: sample) {
+        if let stored = QuickNoteTimestamp.stored(date, like: sample) {
             return stored
         }
         if sample == .null {
@@ -877,7 +877,7 @@ private final class SQLiteDB {
     private func bindIdentity(_ statement: OpaquePointer, index: Int32, id: String, idType: String?) throws {
         if idType == "blob" {
             guard let bytes = uuidBytes(id) else {
-                throw AntinoteDatabaseError.unsupported("This note’s identifier could not be matched.")
+                throw QuickNoteDatabaseError.unsupported("This note’s identifier could not be matched.")
             }
             let code = bytes.withUnsafeBytes { raw in
                 sqlite3_bind_blob(statement, index, raw.baseAddress, Int32(raw.count), transient)
@@ -997,12 +997,12 @@ private final class SQLiteDB {
     private func check(_ code: Int32, detail: String?) throws {
         if code == SQLITE_OK || code == SQLITE_DONE || code == SQLITE_ROW { return }
         if code == SQLITE_BUSY || code == SQLITE_LOCKED {
-            throw AntinoteDatabaseError.busy
+            throw QuickNoteDatabaseError.busy
         }
-        throw AntinoteDatabaseError.sqlite(detail ?? "SQLite error \(code).")
+        throw QuickNoteDatabaseError.sqlite(detail ?? "SQLite error \(code).")
     }
 
-    private static func openError(code: Int32, detail: String, writing: Bool) -> AntinoteDatabaseError {
+    private static func openError(code: Int32, detail: String, writing: Bool) -> QuickNoteDatabaseError {
         let lowered = detail.lowercased()
         if code == SQLITE_AUTH || code == SQLITE_PERM
             || lowered.contains("not permitted")

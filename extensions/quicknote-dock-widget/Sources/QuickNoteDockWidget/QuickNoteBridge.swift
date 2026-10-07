@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 
-enum AntinotePushResult: Equatable, Sendable {
+enum QuickNotePushResult: Equatable, Sendable {
     case saved
     case conflict(current: String)
     case failed(String)
@@ -12,33 +12,33 @@ enum AntinotePushResult: Equatable, Sendable {
 /// ignores outside writes to its database. When Antinote already shows the
 /// note, the text is replaced through Accessibility without surfacing
 /// Antinote. Otherwise the note is opened with `promoteAndOpen`, confirmed,
-/// written, and Antinote is put back the way it was; `AntinoteSuppressor`
+/// written, and Antinote is put back the way it was; `QuickNoteSuppressor`
 /// keeps it out of sight meanwhile.
 @MainActor
-enum AntinoteBridge {
+enum QuickNoteBridge {
     static func push(
         noteID: String,
         content: String,
         baseline: String,
         stored: @escaping @MainActor () async -> String?
-    ) async -> AntinotePushResult {
+    ) async -> QuickNotePushResult {
         guard AXIsProcessTrusted() else {
             return .failed("Vehla needs Accessibility permission (System Settings › Privacy & Security › Accessibility) to confirm the note before changing it in Antinote.")
         }
-        guard let openURL = AntinoteLinks.open(noteID: noteID),
-              let overwriteURL = AntinoteLinks.overwriteCurrent(content: content)
+        guard let openURL = QuickNoteLinks.open(noteID: noteID),
+              let overwriteURL = QuickNoteLinks.overwriteCurrent(content: content)
         else { return .failed("Could not build the Antinote link.") }
 
-        let before = AntinoteAppState.capture()
-        var shown = AntinoteAccessibility.currentNoteText()
+        let before = QuickNoteAppState.capture()
+        var shown = QuickNoteAccessibility.currentNoteText()
         let isTarget: (String) -> Bool = { NoteText.matches($0, baseline) || NoteText.matches($0, content) }
         var switched = false
 
-        var suppressor: AntinoteSuppressor?
+        var suppressor: QuickNoteSuppressor?
         if shown.map(isTarget) != true {
             switched = true
-            suppressor = AntinoteSuppressor(before)
-            guard await AntinoteLauncher.deliverInBackground(openURL) else {
+            suppressor = QuickNoteSuppressor(before)
+            guard await QuickNoteLauncher.deliverInBackground(openURL) else {
                 suppressor?.stop()
                 return .failed("Could not reach Antinote.")
             }
@@ -47,35 +47,35 @@ enum AntinoteBridge {
         guard let shown else {
             suppressor?.stop()
             before.restore()
-            let current = AntinoteAccessibility.currentNoteText()
-            AntinoteDiagnostics.note("push: Antinote shows a different note (\(current?.count ?? -1) chars); not overwriting")
+            let current = QuickNoteAccessibility.currentNoteText()
+            QuickNoteDiagnostics.note("push: Antinote shows a different note (\(current?.count ?? -1) chars); not overwriting")
             if let current { return .conflict(current: current) }
             return .failed("Could not read the note Antinote opened, so nothing was changed. Your text is on the clipboard.")
         }
 
         let alreadyStored = await stored()
         var saved = NoteText.same(shown, content) && NoteText.same(alreadyStored ?? "", content)
-        if !saved, AntinoteAccessibility.setCurrentNoteText(content) {
+        if !saved, QuickNoteAccessibility.setCurrentNoteText(content) {
             saved = await waitForStored(content, stored)
-            AntinoteDiagnostics.note("push: Accessibility write \(saved ? "stored" : "not stored")")
+            QuickNoteDiagnostics.note("push: Accessibility write \(saved ? "stored" : "not stored")")
         }
         if !saved {
-            if suppressor == nil { suppressor = AntinoteSuppressor(before) }
-            if await AntinoteLauncher.deliverInBackground(overwriteURL) {
+            if suppressor == nil { suppressor = QuickNoteSuppressor(before) }
+            if await QuickNoteLauncher.deliverInBackground(overwriteURL) {
                 saved = await waitForStored(content, stored)
-                AntinoteDiagnostics.note("push: overwriteCurrent \(saved ? "stored" : "not stored")")
+                QuickNoteDiagnostics.note("push: overwriteCurrent \(saved ? "stored" : "not stored")")
             }
         }
         suppressor?.stop()
         if switched || before.changed() {
             before.restore()
         }
-        AntinoteDiagnostics.note("push: switched=\(switched) saved=\(saved) hides=\(suppressor?.hides ?? 0)")
+        QuickNoteDiagnostics.note("push: switched=\(switched) saved=\(saved) hides=\(suppressor?.hides ?? 0)")
         return saved ? .saved : .failed("Antinote did not save the new text. Your text is on the clipboard.")
     }
 
     enum CreateResult {
-        case created(AntinoteNote)
+        case created(QuickNoteNote)
         case sent
         case failed(String)
     }
@@ -85,20 +85,20 @@ enum AntinoteBridge {
     static func create(
         content: String,
         existingIDs: Set<String>,
-        load: @escaping @MainActor () async -> [AntinoteNote]?
+        load: @escaping @MainActor () async -> [QuickNoteNote]?
     ) async -> CreateResult {
-        guard let url = AntinoteLinks.createNote(content: content) else {
+        guard let url = QuickNoteLinks.createNote(content: content) else {
             return .failed("Could not build the Antinote link.")
         }
-        let before = AntinoteAppState.capture()
-        let suppressor = AntinoteSuppressor(before)
+        let before = QuickNoteAppState.capture()
+        let suppressor = QuickNoteSuppressor(before)
         defer { suppressor?.stop() }
-        guard await AntinoteLauncher.deliverInBackground(url) else {
+        guard await QuickNoteLauncher.deliverInBackground(url) else {
             return .failed("Could not reach Antinote. Your note is still here.")
         }
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(6)
-        var found: AntinoteNote?
+        var found: QuickNoteNote?
         var foundAt: ContinuousClock.Instant?
         var restores = 0
         while clock.now < deadline {
@@ -113,7 +113,7 @@ enum AntinoteBridge {
             }
             if let foundAt, clock.now - foundAt > .milliseconds(600) { break }
         }
-        AntinoteDiagnostics.note("create: found=\(found != nil) restores=\(restores)")
+        QuickNoteDiagnostics.note("create: found=\(found != nil) restores=\(restores)")
         return found.map(CreateResult.created) ?? .sent
     }
 
@@ -124,7 +124,7 @@ enum AntinoteBridge {
         let clock = ContinuousClock()
         let deadline = clock.now + timeout
         while clock.now < deadline {
-            if let text = AntinoteAccessibility.currentNoteText(), accept(text) {
+            if let text = QuickNoteAccessibility.currentNoteText(), accept(text) {
                 return text
             }
             try? await Task.sleep(for: .milliseconds(80))
@@ -150,16 +150,16 @@ enum AntinoteBridge {
 /// Remembers whether Antinote was hidden, behind, or frontmost so a save
 /// that had to surface it can put it back.
 @MainActor
-struct AntinoteAppState {
+struct QuickNoteAppState {
     var app: NSRunningApplication?
     var wasActive: Bool
     var wasHidden: Bool
     var hadVisibleWindow: Bool
     var previousFront: NSRunningApplication?
 
-    static func capture() -> AntinoteAppState {
-        let app = AntinoteAccessibility.runningApp()
-        return AntinoteAppState(
+    static func capture() -> QuickNoteAppState {
+        let app = QuickNoteAccessibility.runningApp()
+        return QuickNoteAppState(
             app: app,
             wasActive: app?.isActive ?? false,
             wasHidden: app?.isHidden ?? false,
@@ -187,7 +187,7 @@ struct AntinoteAppState {
                 previousFront.activate(options: [])
             }
         }
-        AntinoteDiagnostics.note("restore: hid=\(wasHidden || !hadVisibleWindow) front=\(previousFront?.bundleIdentifier ?? "nil")")
+        QuickNoteDiagnostics.note("restore: hid=\(wasHidden || !hadVisibleWindow) front=\(previousFront?.bundleIdentifier ?? "nil")")
     }
 
     static func visibleWindowCount(_ pid: pid_t) -> Int {
@@ -202,15 +202,15 @@ struct AntinoteAppState {
 /// reads and writes work while it is hidden, so when the user wasn't looking
 /// at Antinote it is hidden again the moment it appears.
 @MainActor
-final class AntinoteSuppressor {
+final class QuickNoteSuppressor {
     private var task: Task<Void, Never>?
     private(set) var hides = 0
 
-    init?(_ state: AntinoteAppState) {
+    init?(_ state: QuickNoteAppState) {
         guard let app = state.app, !state.wasActive, state.wasHidden || !state.hadVisibleWindow else { return nil }
         task = Task { [weak self] in
             while !Task.isCancelled {
-                if app.isActive || !app.isHidden || AntinoteAppState.visibleWindowCount(app.processIdentifier) > 0 {
+                if app.isActive || !app.isHidden || QuickNoteAppState.visibleWindowCount(app.processIdentifier) > 0 {
                     state.restore()
                     self?.hides += 1
                     try? await Task.sleep(for: .milliseconds(30))
@@ -252,7 +252,7 @@ enum NoteText {
 }
 
 @MainActor
-enum AntinoteAccessibility {
+enum QuickNoteAccessibility {
     static let bundleIDs = ["com.chabomakers.Antinote", "com.chabomakers.Antinote-setapp"]
 
     static func currentNoteText() -> String? {

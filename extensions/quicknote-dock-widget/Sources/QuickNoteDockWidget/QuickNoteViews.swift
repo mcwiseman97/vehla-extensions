@@ -3,9 +3,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VehlaDockWidgetSDK
 
-struct AntinoteRootView: View {
+struct QuickNoteRootView: View {
     let surface: VehlaDockWidgetSurface
-    @ObservedObject var model: AntinoteModel
+    @ObservedObject var model: QuickNoteModel
     var body: some View {
         switch surface {
         case .compact:
@@ -34,7 +34,7 @@ struct AntinoteRootView: View {
 }
 
 private struct PopupNoteView: View {
-    @ObservedObject var model: AntinoteModel
+    @ObservedObject var model: QuickNoteModel
     @FocusState private var searchFocused: Bool
     private var primary: Color { Color(nsColor: model.editorTextColor) }
     private var secondary: Color { Color(nsColor: model.theme?.secondaryTextColor ?? .secondaryLabelColor) }
@@ -80,7 +80,7 @@ private struct PopupNoteView: View {
                 model.sidebar.toggle(); if model.sidebar { searchFocused = true }
             } label: { Image(systemName: "magnifyingglass") }
             .help("Search notes (⌘F)").keyboardShortcut("f", modifiers: .command)
-            Text("Antinote").font(.system(size: 13, weight: .semibold))
+            Text("QuickNote").font(.system(size: 13, weight: .semibold))
             Text("SCRATCHPAD").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(secondary)
             Spacer()
             Button { model.navigate(1) } label: { Image(systemName: "chevron.left") }.help("Older note (⌘[)")
@@ -299,7 +299,7 @@ private struct PopupNoteView: View {
 }
 
 private struct ImportNotesView: View {
-    @ObservedObject var model: AntinoteModel
+    @ObservedObject var model: QuickNoteModel
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {

@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "AntinoteDockWidget",
+    name: "QuickNoteDockWidget",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "AntinoteDockWidget", type: .dynamic, targets: ["AntinoteDockWidget"]),
+        .library(name: "QuickNoteDockWidget", type: .dynamic, targets: ["QuickNoteDockWidget"]),
     ],
     dependencies: [
         .package(path: "../../sdk/swift"),
     ],
     targets: [
         .target(
-            name: "AntinoteDockWidget",
+            name: "QuickNoteDockWidget",
             dependencies: [
                 .product(name: "VehlaDockWidgetSDK", package: "swift"),
             ],
@@ -22,8 +22,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "AntinoteDockWidgetTests",
-            dependencies: ["AntinoteDockWidget"],
+            name: "QuickNoteDockWidgetTests",
+            dependencies: ["QuickNoteDockWidget"],
             linkerSettings: [
                 .linkedLibrary("sqlite3"),
             ]

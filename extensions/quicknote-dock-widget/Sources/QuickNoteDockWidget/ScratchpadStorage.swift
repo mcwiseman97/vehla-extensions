@@ -9,8 +9,8 @@ struct ScratchNote: Codable, Identifiable, Equatable, Sendable {
     var slot: Int?
     var deleted: Date?
     var importKey: String?
-    var title: String { AntinoteNote(id: id, content: content).title }
-    var preview: String { AntinoteNote(id: id, content: content).preview }
+    var title: String { QuickNoteNote(id: id, content: content).title }
+    var preview: String { QuickNoteNote(id: id, content: content).preview }
 }
 
 struct ScratchLibrary: Codable, Equatable, Sendable {
@@ -26,7 +26,7 @@ struct ScratchLibrary: Codable, Equatable, Sendable {
     func validate() throws {
         guard version == 1, notes.count <= 50_000,
               Set(notes.map(\.id)).count == notes.count,
-              notes.allSatisfy({ $0.content.utf8.count <= AntinoteDatabase.contentLimit && !$0.id.isEmpty }),
+              notes.allSatisfy({ $0.content.utf8.count <= QuickNoteDatabase.contentLimit && !$0.id.isEmpty }),
               [0, 1, 7, 30, 365].contains(expiryDays), (11...28).contains(fontSize),
               notes.allSatisfy({ $0.slot == nil || (1...9).contains($0.slot!) }) else {
             throw ScratchError.message("This library contains unsupported or oversized notes or settings.")
@@ -67,7 +67,17 @@ enum ScratchError: LocalizedError, Sendable {
 actor ScratchRepository {
     let root: URL
     private var savedRevision: UInt64?
-    init(root: URL) { self.root = root }
+    private let legacyRoot: URL?
+    init(root: URL, legacyRoot: URL? = nil) {
+        self.root = root
+        self.legacyRoot = legacyRoot
+    }
+
+    /// Only the renamed package's sibling storage is eligible, never an arbitrary directory.
+    static func legacyDirectory(for root: URL) -> URL? {
+        guard root.lastPathComponent == "com.wiseman.vehla.quicknote" else { return nil }
+        return root.deletingLastPathComponent().appendingPathComponent("com.wiseman.vehla.antinote")
+    }
     private var file: URL { root.appendingPathComponent("scratchpad.json") }
     private var backup: URL { root.appendingPathComponent("scratchpad.previous.json") }
     static let byteLimit = 100 * 1_024 * 1_024
@@ -88,6 +98,29 @@ actor ScratchRepository {
         }
         guard !FileManager.default.fileExists(atPath: backup.path) else {
             throw ScratchError.message("Your library is missing. Choose Recover Previous Save in the menu.")
+        }
+        if let legacyRoot {
+            let legacyFile = legacyRoot.appendingPathComponent("scratchpad.json")
+            let legacyBackup = legacyRoot.appendingPathComponent("scratchpad.previous.json")
+            // Copy the recovery snapshot first. A failed primary migration remains recoverable.
+            if FileManager.default.fileExists(atPath: legacyBackup.path) {
+                do {
+                    _ = try Self.read(legacyBackup)
+                    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                    try Data(contentsOf: legacyBackup).write(to: backup, options: .atomic)
+                } catch {
+                    // A damaged older snapshot must not block a valid current library.
+                    guard FileManager.default.fileExists(atPath: legacyFile.path) else { throw error }
+                }
+            }
+            if FileManager.default.fileExists(atPath: legacyFile.path) {
+                let library = try Self.read(legacyFile)
+                try save(library)
+                return library
+            }
+            if FileManager.default.fileExists(atPath: backup.path) {
+                throw ScratchError.message("Your previous library is missing. Choose Recover Previous Save in the menu.")
+            }
         }
         let library = ScratchLibrary.tutorials()
         try save(library)
@@ -132,11 +165,11 @@ struct ImportPreview: Sendable {
 actor ScratchImporter {
     func discover(home: URL, installed: Bool) throws -> ImportPreview {
         try Task.checkCancellation()
-        let found = AntinoteDatabase.discover(home: home)
-        if let best = AntinoteDatabase.best(found) {
+        let found = QuickNoteDatabase.discover(home: home)
+        if let best = QuickNoteDatabase.best(found) {
             return try database(best.url)
         }
-        if let candidate = AntinoteDatabase.locate(home: home) { return try database(candidate.url) }
+        if let candidate = QuickNoteDatabase.locate(home: home) { return try database(candidate.url) }
         if let error = found.compactMap(\.error).first { throw ScratchError.message(error) }
         let containers = home.appendingPathComponent("Library/Containers")
         for bundle in ["com.chabomakers.Antinote", "com.chabomakers.Antinote-setapp"] {
@@ -144,7 +177,7 @@ actor ScratchImporter {
             catch {
                 let nsError = error as NSError
                 if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError {
-                    throw AntinoteDatabaseError.permission("Alternatively, choose an exported file or SQLite backup you can access.")
+                    throw QuickNoteDatabaseError.permission("Alternatively, choose an exported file or SQLite backup you can access.")
                 }
             }
         }
@@ -155,7 +188,7 @@ actor ScratchImporter {
 
     func database(_ url: URL) throws -> ImportPreview {
         try Task.checkCancellation()
-        let library = try AntinoteDatabase.load(url)
+        let library = try QuickNoteDatabase.load(url)
         guard library.notes.count <= 50_000 else { throw ScratchError.message("Import supports up to 50,000 notes at once.") }
         let notes = library.notes.map { note in
             // Antinote identities are shared across stable, legacy and backup stores.
@@ -183,7 +216,7 @@ actor ScratchImporter {
                     var copy = note; copy.importKey = note.importKey ?? "vehla:\(note.id)"; copy.id = UUID().uuidString; return copy
                 }
             case "txt", "md", "markdown":
-                guard size <= AntinoteDatabase.contentLimit else { throw ScratchError.message("\(url.lastPathComponent) exceeds the 2 MB note limit.") }
+                guard size <= QuickNoteDatabase.contentLimit else { throw ScratchError.message("\(url.lastPathComponent) exceeds the 2 MB note limit.") }
                 let data = try Data(contentsOf: url)
                 guard let text = String(data: data, encoding: .utf8) else { throw ScratchError.message("\(url.lastPathComponent) is not UTF-8 text.") }
                 let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

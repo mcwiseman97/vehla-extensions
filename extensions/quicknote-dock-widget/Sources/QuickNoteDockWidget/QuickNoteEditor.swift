@@ -97,6 +97,7 @@ struct InlineNoteEditor: NSViewRepresentable {
         if selectionChanged {
             textView.focusToken = focusToken
             textView.mathAnalysis = ScratchAnalysis()
+            textView.clearDerivedStyle()
             textView.undoManager?.removeAllActions()
             if autoFocus { textView.requestFocus() }
         }
@@ -152,6 +153,7 @@ struct NoteCheckbox: Equatable, Sendable {
     var checked: Bool
     /// The rest of the line after the marker.
     var body: NSRange
+    var implicit = false
 
     private static let pattern = try! NSRegularExpression(
         pattern: #"^[ \t]*((- )?\[([ xX]?)\])(?=[ \t]|$)(.*)$"#,
@@ -160,7 +162,7 @@ struct NoteCheckbox: Equatable, Sendable {
 
     static func find(in text: String) -> [NoteCheckbox] {
         let whole = NSRange(location: 0, length: (text as NSString).length)
-        return pattern.matches(in: text, range: whole).map { match in
+        var boxes = pattern.matches(in: text, range: whole).map { match in
             let inner = match.range(at: 3)
             let mark = (text as NSString).substring(with: inner)
             return NoteCheckbox(
@@ -171,14 +173,58 @@ struct NoteCheckbox: Equatable, Sendable {
                 body: match.range(at: 4)
             )
         }
+        let source = text as NSString
+        let explicitLines = Set(boxes.map { source.lineRange(for: $0.marker).location })
+        let header = text.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        if header == "list" || header.hasPrefix("list:") {
+            var offset = 0
+            while offset < source.length {
+                let line = source.lineRange(for: NSRange(location: offset, length: 0))
+                defer { offset = NSMaxRange(line) }
+                guard offset > 0 else { continue }
+                let content = source.substring(with: line).trimmingCharacters(in: .newlines)
+                let trimmed = content.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("//"), !trimmed.hasPrefix("#"), !trimmed.hasPrefix("/"),
+                      trimmed.range(of: #"^(?:[-*]\s|\d+\.\s)"#, options: .regularExpression) == nil,
+                      !explicitLines.contains(line.location) else { continue }
+                let indent = content.prefix(while: { $0 == " " || $0 == "\t" }).utf16.count
+                let start = line.location + indent
+                boxes.append(NoteCheckbox(marker: NSRange(location: start, length: 0), inner: NSRange(location: start, length: 0),
+                                          dashed: false, checked: false, body: NSRange(location: start, length: content.utf16.count - indent), implicit: true))
+            }
+        }
+        return boxes.sorted { $0.marker.location < $1.marker.location }
     }
 
     /// The edit that flips this checkbox, keeping Antinote's marker style.
     var toggle: (range: NSRange, replacement: String) {
+        if implicit { return (inner, "[x] ") }
         if checked {
             return (inner, dashed ? " " : "")
         }
         return (inner, "x")
+    }
+
+    func adjusted(for edit: NSRange, replacement: String) -> Self? {
+        let delta = replacement.utf16.count - edit.length
+        if implicit, edit.location == marker.location, edit.length == 0 {
+            guard !replacement.contains(where: \.isNewline) else { return nil }
+            var box = self; box.body.length += delta; return box
+        }
+        if NSMaxRange(edit) <= marker.location {
+            var box = self
+            box.marker.location += delta; box.inner.location += delta; box.body.location += delta
+            return box
+        }
+        if edit.location < NSMaxRange(marker) { return nil }
+        if edit.location <= NSMaxRange(body) {
+            guard NSMaxRange(edit) <= NSMaxRange(body), !replacement.contains(where: \.isNewline) else { return nil }
+            var box = self
+            box.body.length = max(0, body.length + delta)
+            if implicit && box.body.length == 0 { return nil }
+            return box
+        }
+        return self
     }
 }
 
@@ -227,6 +273,9 @@ final class InlineTextView: NSTextView {
 
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         guard super.shouldChangeText(in: affectedCharRange, replacementString: replacementString) else { return false }
+        if let replacementString {
+            checkboxes = checkboxes.compactMap { $0.adjusted(for: affectedCharRange, replacement: replacementString) }
+        }
         if mathAnalysis.mode == "math", let replacementString {
             let delta = replacementString.utf16.count - affectedCharRange.length
             var updated = mathAnalysis
@@ -249,7 +298,7 @@ final class InlineTextView: NSTextView {
         }
         return true
     }
-    private var checkboxes: [NoteCheckbox] = []
+    private(set) var checkboxes: [NoteCheckbox] = []
     private var monitor: Any?
     private var armed = false
 
@@ -342,7 +391,6 @@ final class InlineTextView: NSTextView {
 
     func restyle() {
         styleTask?.cancel()
-        checkboxes = [] // Old ranges must never be hit-tested against new text.
         let snapshot = string
         styleTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(70)) } catch { return }
@@ -353,6 +401,11 @@ final class InlineTextView: NSTextView {
             self.spans = boxes.1
             self.applyStyle()
         }
+    }
+
+    func clearDerivedStyle() {
+        styleTask?.cancel()
+        checkboxes = []; spans = []
     }
 
     private func applyStyle() {
@@ -379,7 +432,20 @@ final class InlineTextView: NSTextView {
             }
         }
         for box in checkboxes {
-            storage.addAttribute(.foregroundColor, value: NSColor.clear, range: box.marker)
+            guard NSMaxRange(box.marker) <= storage.length, NSMaxRange(box.body) <= storage.length else { continue }
+            if box.implicit {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.firstLineHeadIndent = font.pointSize + 7
+                paragraph.headIndent = font.pointSize + 7
+                storage.addAttribute(.paragraphStyle, value: paragraph, range: box.body)
+            } else { storage.addAttribute(.foregroundColor, value: NSColor.clear, range: box.marker) }
+            // Reserve enough width for the drawn box so it cannot cover the
+            // first letter of the item at larger editor font sizes.
+            if box.marker.length > 0 {
+                let markerWidth = (storage.string as NSString).substring(with: box.marker).size(withAttributes: [.font: font]).width
+                storage.addAttribute(.kern, value: max(0, font.pointSize + 7 - markerWidth),
+                                     range: NSRange(location: NSMaxRange(box.marker) - 1, length: 1))
+            }
             if box.checked, box.body.length > 0 {
                 storage.addAttributes([
                     .foregroundColor: baseColor.withAlphaComponent(0.45),
@@ -402,7 +468,13 @@ final class InlineTextView: NSTextView {
     }
 
     private func markerRect(for box: NoteCheckbox) -> NSRect {
-        guard let layoutManager, let textContainer else { return .zero }
+        guard let layoutManager, let textContainer, NSMaxRange(box.marker) <= (string as NSString).length else { return .zero }
+        if box.implicit, box.body.length > 0 {
+            let glyph = layoutManager.glyphIndexForCharacter(at: box.body.location)
+            let rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
+            return NSRect(x: rect.minX + textContainerOrigin.x - baseFont.pointSize - 7,
+                          y: rect.minY + textContainerOrigin.y, width: baseFont.pointSize + 1, height: rect.height)
+        }
         let glyphs = layoutManager.glyphRange(forCharacterRange: box.marker, actualCharacterRange: nil)
         return layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
             .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
@@ -523,6 +595,110 @@ final class InlineTextView: NSTextView {
 
 
 extension InlineTextView {
+    private var listMode: Bool {
+        let first = string.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        return first == "list" || first.hasPrefix("list:")
+    }
+
+    private static let slashCommands = ["/list", "/math", "/sum", "/average", "/count", "/code", "/text",
+                                        "/checkbox", "/bullet", "/numbered", "/x", "/date", "/time",
+                                        "/new", "/search", "/copy", "/paste", "/timer", "/import", "/export"]
+
+    override var rangeForUserCompletion: NSRange {
+        let source = string as NSString
+        let cursor = selectedRange().location
+        guard cursor <= source.length else { return super.rangeForUserCompletion }
+        let line = source.lineRange(for: NSRange(location: cursor, length: 0))
+        let prefix = source.substring(with: NSRange(location: line.location, length: cursor - line.location))
+        if prefix.range(of: #"^\s*/[a-z]*$"#, options: .regularExpression) != nil,
+           let slash = prefix.firstIndex(of: "/") {
+            let offset = prefix[..<slash].utf16.count
+            return NSRange(location: line.location + offset, length: cursor - line.location - offset)
+        }
+        return super.rangeForUserCompletion
+    }
+
+    override func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
+        let source = string as NSString
+        guard NSMaxRange(charRange) <= source.length else { return nil }
+        let prefix = source.substring(with: charRange).lowercased()
+        guard prefix.hasPrefix("/"), !prefix.hasPrefix("//") else {
+            return super.completions(forPartialWordRange: charRange, indexOfSelectedItem: index)
+        }
+        index.pointee = 0
+        return Self.slashCommands.filter { $0.hasPrefix(prefix) }
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        super.insertText(insertString, replacementRange: replacementRange)
+        if let text = insertString as? String, text == "x" || text == "X" {
+            checkTrigger()
+        }
+        if let text = insertString as? String, text == "/", window != nil {
+            let range = rangeForUserCompletion
+            if range.location != NSNotFound, (string as NSString).substring(with: range) == "/" {
+                DispatchQueue.main.async { [weak self] in self?.complete(nil) }
+            }
+        }
+    }
+
+    private func checkTrigger() {
+        let source = string as NSString, cursor = selectedRange().location
+        guard cursor >= 2, cursor <= source.length,
+              source.substring(with: NSRange(location: cursor - 2, length: 2)).lowercased() == "/x" else { return }
+        let range = source.lineRange(for: NSRange(location: cursor - 2, length: 0))
+        let prefix = source.substring(with: NSRange(location: range.location, length: cursor - 2 - range.location))
+        let trimmed = prefix.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("//"), !trimmed.hasPrefix("#"),
+              range.location != 0 || !listMode else { return }
+        let box = NoteCheckbox.find(in: prefix).first
+        guard box != nil || (listMode && range.location > 0) else { return }
+        super.insertText("", replacementRange: NSRange(location: cursor - 2, length: 2))
+        if let box {
+            let edit = box.toggle
+            super.insertText(edit.replacement, replacementRange: NSRange(location: range.location + edit.range.location, length: edit.range.length))
+        } else {
+            super.insertText("[x] ", replacementRange: NSRange(location: range.location, length: 0))
+        }
+        let newLine = (string as NSString).lineRange(for: NSRange(location: range.location, length: 0))
+        setSelectedRange(NSRange(location: NSMaxRange(newLine) - ((string as NSString).substring(with: newLine).hasSuffix("\n") ? 1 : 0), length: 0))
+    }
+
+    private func executeSlash(_ line: String, range: NSRange) -> Bool {
+        let command = line.trimmingCharacters(in: .whitespaces).lowercased()
+        guard command.hasPrefix("/"), !command.hasPrefix("//") else { return false }
+        let modes = ["list", "math", "sum", "average", "count", "code", "text"]
+        if command.hasPrefix("/"), modes.contains(String(command.dropFirst())) {
+            let mode = String(command.dropFirst())
+            insertText("", replacementRange: NSRange(location: range.location, length: (line as NSString).length))
+            let source = string as NSString
+            let first = source.lineRange(for: NSRange(location: 0, length: 0))
+            let header = source.substring(with: first).trimmingCharacters(in: .newlines)
+            let existingMode = header.lowercased().split(separator: ":").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+            if modes.contains(existingMode) || header.isEmpty {
+                let title = header.firstIndex(of: ":").map { String(header[header.index(after: $0)...]).trimmingCharacters(in: .whitespaces) } ?? ""
+                insertText(mode + (title.isEmpty ? "" : ": " + title) + "\n", replacementRange: first)
+            } else { insertText(mode + "\n", replacementRange: NSRange(location: 0, length: 0)) }
+            setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
+            return true
+        }
+        let replacements = ["/checkbox": "[] ", "/bullet": "- ", "/numbered": "1. ",
+                            "/date": Date().formatted(date: .numeric, time: .omitted),
+                            "/time": Date().formatted(date: .omitted, time: .shortened)]
+        if let replacement = replacements[command] {
+            insertText(replacement, replacementRange: NSRange(location: range.location, length: (line as NSString).length))
+            return true
+        }
+        let name = command.split(separator: " ").first.map(String.init) ?? ""
+        if ["/new", "/search", "/copy", "/paste", "/timer", "/import", "/export"].contains(name) {
+            if name == "/timer", ScratchTimerCommand.parse(String(command.dropFirst())) == nil,
+               !["/timer p", "/timer r", "/timer s", "/timer 0"].contains(command) { return false }
+            insertText("", replacementRange: NSRange(location: range.location, length: (line as NSString).length))
+            return onCommand(command)
+        }
+        return false
+    }
+
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         if let text = board.string(forType: .string) {
@@ -538,6 +714,7 @@ extension InlineTextView {
         let selection = selectedRange()
         let lineRange = source.lineRange(for: NSRange(location: selection.location, length: 0))
         let line = source.substring(with: lineRange).trimmingCharacters(in: .newlines)
+        if executeSlash(line, range: lineRange) { return }
         if onCommand(line) { super.insertNewline(sender); return }
         let prefixRegex = try! NSRegularExpression(pattern: #"^(\s*)(- \[ \]|- \[x\]|\[ \]|\[x\]|\[\]|[-*]|\d+\.)\s+"#)
         if let match = prefixRegex.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) {
@@ -547,11 +724,10 @@ extension InlineTextView {
             if (line as NSString).length == match.range.length {
                 insertText("", replacementRange: NSRange(location: lineRange.location, length: match.range.length))
             } else { insertText("\n" + indent + marker + " ", replacementRange: selection) }
-        } else if string.components(separatedBy: .newlines).first?.lowercased().hasPrefix("list") == true && !line.hasPrefix("//") && !line.hasPrefix("#") {
-            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
-                insertText("[] ", replacementRange: NSRange(location: lineRange.location, length: 0))
-                insertText("\n[] ", replacementRange: NSRange(location: selection.location + 3, length: selection.length))
-            } else { insertText("[] ", replacementRange: selection) }
+        } else if listMode && lineRange.location == 0 {
+            super.insertNewline(sender)
+        } else if listMode && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
+            super.insertNewline(sender)
         } else { super.insertNewline(sender) }
     }
 

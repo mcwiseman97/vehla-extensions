@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import VehlaDockWidgetSDK
 
 @MainActor
-final class AntinoteModel: ObservableObject {
+final class QuickNoteModel: ObservableObject {
     @Published private(set) var library = ScratchLibrary()
     @Published private(set) var loading = true
     @Published private(set) var ready = false
@@ -61,7 +61,7 @@ final class AntinoteModel: ObservableObject {
 
     func configure(_ context: VehlaDockWidgetContext) {
         self.context = context; theme = context.theme; closed = false
-        if repository == nil { repository = ScratchRepository(root: context.dataDirectory) }
+        if repository == nil { repository = ScratchRepository(root: context.dataDirectory, legacyRoot: ScratchRepository.legacyDirectory(for: context.dataDirectory)) }
         start()
     }
 
@@ -143,7 +143,7 @@ final class AntinoteModel: ObservableObject {
         stopCapture()
         pruneEmpty(except: id)
         library.selectedID = id; draft = note.content; focusToken = UUID()
-        changed(); analyze(); publish()
+        changed(); analyze()
     }
 
     private func pruneEmpty(except id: String? = nil) {
@@ -161,7 +161,7 @@ final class AntinoteModel: ObservableObject {
 
     func inlineEdited(_ text: String) {
         guard ready, let index = library.notes.firstIndex(where: { $0.id == selectedID && $0.deleted == nil }) else { return }
-        guard text.utf8.count <= AntinoteDatabase.contentLimit else { fail("Notes are limited to 2 MB."); return }
+        guard text.utf8.count <= QuickNoteDatabase.contentLimit else { fail("Notes are limited to 2 MB."); return }
         draft = text; library.notes[index].content = text; library.notes[index].modified = Date()
         changed(); analyze()
     }
@@ -243,9 +243,8 @@ final class AntinoteModel: ObservableObject {
     func copyDraft() { context?.copyText(draft); pasteboardChange = NSPasteboard.general.changeCount; notice("Copied.") }
     private func entity() -> VehlaDockWidgetSharedContext? {
         guard let selected else { return nil }
-        return VehlaDockWidgetSharedContext(id: selected.id, kind: .text, sourceID: "antinote", title: selected.title, body: draft)
+        return VehlaDockWidgetSharedContext(id: selected.id, kind: .text, sourceID: "quicknote", title: selected.title, body: draft)
     }
-    func publish() { if let entity = entity() { context?.app?.publish(entity) } }
     func sendToNotes() {
         guard let entity = entity(), context?.app?.perform(.addToNotes, with: entity) == true else {
             fail("This Vehla version cannot add notes through the app bridge. Use Copy or Export."); return
@@ -367,6 +366,15 @@ final class AntinoteModel: ObservableObject {
     }
 
     func command(_ line: String) -> Bool {
+        switch line.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "/new": startNewNote(); return true
+        case "/search": sidebar = true; return true
+        case "/import": beginImport(); return true
+        case "/export": export(); return true
+        case "/copy": copyDraft(); return true
+        default: break
+        }
+        let line = line.hasPrefix("/") ? String(line.dropFirst()) : line
         let lower = line.trimmingCharacters(in: .whitespaces).lowercased()
         if lower == "paste" || (lower.hasPrefix("paste(") && lower.hasSuffix(")")) {
             if autoPaste { stopCapture() }

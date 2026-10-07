@@ -1,25 +1,24 @@
 {
   "apiVersion": 3,
-  "id": "com.wiseman.vehla.antinote",
-  "name": "Antinote Dock Widget",
-  "version": "2.0.6",
+  "id": "com.wiseman.vehla.quicknote",
+  "name": "QuickNote",
+  "version": "2.1.0",
   "description": "A native scratchpad with checklists, calculations, capture, permanent slots and safe Antinote import.",
   "author": "Michael Wiseman",
   "runtime": "dockWidget",
-  "entrypoint": "bin/AntinoteDockWidget.bundle",
+  "entrypoint": "bin/QuickNoteDockWidget.bundle",
   "capabilities": [
     "persistentStorage",
     "openURL",
     "clipboardRead",
     "clipboardWrite",
     "userSelectedFiles",
-    "sharedContextPublish",
     "appActions"
   ],
   "dockWidgets": [
     {
-      "id": "antinote",
-      "title": "Antinote",
+      "id": "quicknote",
+      "title": "QuickNote",
       "subtitle": "A scratchpad for the present moment",
       "systemImage": "note.text",
       "preferredPopupWidth": 760,

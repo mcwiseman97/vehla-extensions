@@ -3,7 +3,7 @@ import Foundation
 import SQLite3
 import Testing
 import VehlaDockWidgetSDK
-@testable import AntinoteDockWidget
+@testable import QuickNoteDockWidget
 
 @Suite struct ScratchpadTests {
     private func scratch() throws -> URL {
@@ -23,6 +23,45 @@ import VehlaDockWidgetSDK
         let reopened = try await ScratchRepository(root: root).load()
         #expect(reopened.notes[0].content == "Actual user note")
         #expect(reopened.revision == 2)
+    }
+    @Test func renameMigratesEntireLibraryWithoutChangingOriginal() async throws {
+        let parent = try scratch(); defer { try? FileManager.default.removeItem(at: parent) }
+        let old = parent.appendingPathComponent("com.wiseman.vehla.antinote")
+        let root = parent.appendingPathComponent("com.wiseman.vehla.quicknote")
+        let previous = ScratchRepository(root: old)
+        var state = try await previous.load()
+        state.notes[0].content = "math: My budget\ncoffee = 4.5\ncoffee * 6 ="
+        state.notes[0].slot = 3; state.notes[1].deleted = Date()
+        state.fontSize = 22; state.linedPaper = true; state.expiryDays = 7
+        state.importedKeys = ["antinote:kept"]; state.revision = 12
+        try await previous.save(state)
+        let before = try Data(contentsOf: old.appendingPathComponent("scratchpad.json"))
+        let migrated = try await ScratchRepository(root: root, legacyRoot: ScratchRepository.legacyDirectory(for: root)).load()
+        #expect(migrated == state)
+        #expect(try Data(contentsOf: old.appendingPathComponent("scratchpad.json")) == before)
+        #expect(try await ScratchRepository(root: root).load() == state)
+        #expect(ScratchRepository.legacyDirectory(for: parent) == nil)
+        var local = state; local.revision += 1; local.notes[0].content = "Edited in QuickNote"
+        try await ScratchRepository(root: root).save(local)
+        #expect(try await ScratchRepository(root: root, legacyRoot: old).load() == local)
+    }
+    @Test func renameMigratesValidPrimaryWithDamagedBackup() async throws {
+        let parent = try scratch(); defer { try? FileManager.default.removeItem(at: parent) }
+        let old = parent.appendingPathComponent("old"), root = parent.appendingPathComponent("new")
+        let state = try await ScratchRepository(root: old).load()
+        try Data("broken".utf8).write(to: old.appendingPathComponent("scratchpad.previous.json"))
+        #expect(try await ScratchRepository(root: root, legacyRoot: old).load() == state)
+    }
+    @Test func renameKeepsCorruptLibraryRecoverableInsteadOfSeedingTutorials() async throws {
+        let parent = try scratch(); defer { try? FileManager.default.removeItem(at: parent) }
+        let old = parent.appendingPathComponent("old"), root = parent.appendingPathComponent("new")
+        let previous = ScratchRepository(root: old)
+        var state = try await previous.load(); let first = state
+        state.revision += 1; try await previous.save(state)
+        try Data("corrupt".utf8).write(to: old.appendingPathComponent("scratchpad.json"))
+        let repository = ScratchRepository(root: root, legacyRoot: old)
+        await #expect(throws: (any Error).self) { try await repository.load() }
+        #expect(try await repository.recover().notes == first.notes)
     }
     @Test func corruptPrimaryDoesNotEraseBackup() async throws {
         let root = try scratch(); defer { try? FileManager.default.removeItem(at: root) }
@@ -48,7 +87,7 @@ import VehlaDockWidgetSDK
         #expect(state.notes[1].content == "Edited locally")
         try state.validate()
     }
-    @Test func missingAntinoteIsUsefulAndTextImportsDeduplicate() async throws {
+    @Test func missingQuickNoteIsUsefulAndTextImportsDeduplicate() async throws {
         let home = try scratch(); defer { try? FileManager.default.removeItem(at: home) }
         let importer = ScratchImporter()
         let absent = try await importer.discover(home: home, installed: false)
@@ -140,7 +179,7 @@ import VehlaDockWidgetSDK
 }
 
 @Suite(.serialized) @MainActor struct ScratchpadIntegrationTests {
-    private func waitReady(_ model: AntinoteModel) async throws {
+    private func waitReady(_ model: QuickNoteModel) async throws {
         for _ in 0..<100 {
             if model.ready { return }
             try await Task.sleep(for: .milliseconds(20))
@@ -157,13 +196,15 @@ import VehlaDockWidgetSDK
         var timerDuration: TimeInterval?
         let app = VehlaDockWidgetAppBridge(currentContextHandler: { nil }, publishHandler: { published = $0; return true },
                                           actionHandler: { _, _ in true }, timerHandler: { _, duration, _ in timerDuration = duration; return true })
-        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "antinote", dataDirectory: root, theme: theme,
+        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "quicknote", dataDirectory: root, theme: theme,
                                              app: app, invalidationHandler: {}, actionHandler: { actions.append($0) })
-        let model = AntinoteModel(); model.configure(context)
+        let model = QuickNoteModel(); model.configure(context)
         try await waitReady(model)
         model.startNewNote(); model.inlineEdited("Saved on immediate close")
         let id = model.selectedID
-        model.publish(); #expect(published?.body == "Saved on immediate close")
+        model.select(try #require(id))
+        #expect(published == nil)
+        #expect(actions.isEmpty)
         model.copyDraft(); #expect(actions.count == 1)
         #expect(model.command("timer 3:30: Tea"))
         #expect(timerDuration == 210)
@@ -175,13 +216,67 @@ import VehlaDockWidgetSDK
         }
         Issue.record("Closing did not flush the accepted edit")
     }
+    @Test func listHeaderAndNonItemsNeverReceiveCheckboxes() {
+        let text = "list: Shopping\nMilk\n// comment\n# Heading\n1. numbered\n- bullet\n[] Bread\n"
+        let boxes = NoteCheckbox.find(in: text)
+        #expect(boxes.count == 2)
+        #expect(boxes[0].implicit)
+        #expect((text as NSString).substring(with: boxes[0].body) == "Milk")
+        #expect(!boxes[1].implicit)
+        #expect(boxes.allSatisfy { $0.marker.location > 0 })
+        let view = InlineTextView(usingTextLayoutManager: false)
+        view.string = "list: Shopping"
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.insertNewline(nil)
+        #expect(view.string == "list: Shopping\n")
+        view.detach()
+    }
+
+    @Test func slashCommandsAndCheckTriggerUseNativeEdits() {
+        let view = InlineTextView(usingTextLayoutManager: false)
+        view.allowsUndo = true
+        view.string = "/ma"; view.setSelectedRange(NSRange(location: 3, length: 0))
+        var index = 0
+        #expect(view.completions(forPartialWordRange: view.rangeForUserCompletion, indexOfSelectedItem: &index) == ["/math"])
+        view.string = "/list"; view.setSelectedRange(NSRange(location: 5, length: 0))
+        view.insertNewline(nil)
+        #expect(view.string == "list\n")
+        view.insertText("Milk/", replacementRange: view.selectedRange())
+        view.insertText("x", replacementRange: view.selectedRange())
+        #expect(view.string == "list\n[x] Milk")
+        view.insertText("/", replacementRange: view.selectedRange())
+        view.insertText("x", replacementRange: view.selectedRange())
+        #expect(view.string == "list\n[] Milk")
+        view.string = "list: Budget\n/math"
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0)); view.insertNewline(nil)
+        #expect(view.string == "math: Budget\n")
+        view.string = "/unknown"; view.setSelectedRange(NSRange(location: 8, length: 0)); view.insertNewline(nil)
+        #expect(view.string == "/unknown\n")
+        view.detach()
+    }
+
+    @Test func checkboxPositionsStayVisibleWhileTyping() async throws {
+        let view = InlineTextView(usingTextLayoutManager: false)
+        view.string = "list: Shopping\n[] Milk\n[] Bread"
+        view.restyle(); try await Task.sleep(for: .milliseconds(150))
+        let old = view.checkboxes
+        #expect(old.count == 2)
+        let position = (view.string as NSString).range(of: "Milk").location + 4
+        view.insertText("!", replacementRange: NSRange(location: position, length: 0))
+        view.restyle()
+        #expect(view.checkboxes.count == 2)
+        #expect(view.checkboxes[0].marker == old[0].marker)
+        #expect(view.checkboxes[1].marker.location == old[1].marker.location + 1)
+        view.detach()
+    }
+
     @Test func nativeEditorContinuesListsAndHasUndo() {
         let view = InlineTextView(usingTextLayoutManager: false)
         view.allowsUndo = true
         view.string = "list: Today\nBuy milk"
         view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
         view.insertNewline(nil)
-        #expect(view.string == "list: Today\n[] Buy milk\n[] ")
+        #expect(view.string == "list: Today\nBuy milk\n")
         view.string = "- [x] Done"; view.setSelectedRange(NSRange(location: 10, length: 0))
         view.insertNewline(nil)
         #expect(view.string == "- [x] Done\n- [ ] ")
@@ -249,13 +344,13 @@ import VehlaDockWidgetSDK
         _ = NSApplication.shared
         let theme = VehlaDockWidgetTheme(isDark: false, accentColor: .systemIndigo, primaryTextColor: .labelColor,
                                         secondaryTextColor: .secondaryLabelColor, surfaceColor: .windowBackgroundColor)
-        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "antinote", dataDirectory: root, theme: theme,
+        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "quicknote", dataDirectory: root, theme: theme,
                                              invalidationHandler: {}, actionHandler: { _ in })
-        let plugin = AntinoteDockWidgetPlugin()
+        let plugin = QuickNoteDockWidgetPlugin()
         #expect(plugin.apiVersion == VehlaDockWidgetAPIVersion)
-        let popup = try plugin.makeViewController(widgetID: "antinote", surface: .popup, context: context)
-        _ = try plugin.makeViewController(widgetID: "antinote", surface: .compact, context: context)
-        _ = try plugin.makeViewController(widgetID: "antinote", surface: .inline, context: context)
+        let popup = try plugin.makeViewController(widgetID: "quicknote", surface: .popup, context: context)
+        _ = try plugin.makeViewController(widgetID: "quicknote", surface: .compact, context: context)
+        _ = try plugin.makeViewController(widgetID: "quicknote", surface: .inline, context: context)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 680), styleMask: [.titled], backing: .buffered, defer: false)
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -284,7 +379,8 @@ import VehlaDockWidgetSDK
         if let bitmap = popup.view.bitmapImageRepForCachingDisplay(in: popup.view.bounds) {
             popup.view.cacheDisplay(in: popup.view.bounds, to: bitmap)
             #expect(bitmap.pixelsWide > 0)
-            let paperColor = try #require(bitmap.colorAt(x: 380, y: 500))
+            let paperColor = try #require(bitmap.colorAt(x: Int(380 * CGFloat(bitmap.pixelsWide) / popup.view.bounds.width),
+                                                        y: Int(500 * CGFloat(bitmap.pixelsHigh) / popup.view.bounds.height)))
             #expect(paperColor.alphaComponent < 0.01)
             if let data = bitmap.representation(using: .png, properties: [:]) {
                 try data.write(to: URL(fileURLWithPath: "/tmp/vehla-antinote-preview.png"))
@@ -303,8 +399,8 @@ import VehlaDockWidgetSDK
                 try data.write(to: URL(fileURLWithPath: "/tmp/vehla-antinote-inline-math.png"))
             }
         }
-        plugin.widget("antinote", didEnter: .hidden)
-        plugin.widgetWillClose("antinote")
+        plugin.widget("quicknote", didEnter: .hidden)
+        plugin.widgetWillClose("quicknote")
         window.contentViewController = nil
     }
 }

@@ -2,13 +2,13 @@ import AppKit
 import SwiftUI
 import VehlaDockWidgetSDK
 
-@objc(AntinoteDockWidgetPlugin)
-public final class AntinoteDockWidgetPlugin: NSObject, VehlaDockWidgetPlugin {
+@objc(QuickNoteDockWidgetPlugin)
+public final class QuickNoteDockWidgetPlugin: NSObject, VehlaDockWidgetPlugin {
     public let apiVersion = VehlaDockWidgetAPIVersion
     public let widgets = [
         VehlaDockWidgetDescriptor(
-            id: "antinote",
-            title: "Antinote",
+            id: "quicknote",
+            title: "QuickNote",
             subtitle: "A scratchpad for the present moment",
             systemImage: "note.text",
             preferredPopupWidth: 760,
@@ -17,7 +17,7 @@ public final class AntinoteDockWidgetPlugin: NSObject, VehlaDockWidgetPlugin {
         ),
     ]
 
-    @MainActor private let model = AntinoteModel()
+    @MainActor private let model = QuickNoteModel()
 
     @MainActor
     public func makeViewController(
@@ -25,11 +25,11 @@ public final class AntinoteDockWidgetPlugin: NSObject, VehlaDockWidgetPlugin {
         surface: VehlaDockWidgetSurface,
         context: VehlaDockWidgetContext
     ) throws -> NSViewController {
-        guard widgetID == "antinote" else {
+        guard widgetID == "quicknote" else {
             throw CocoaError(.fileNoSuchFile)
         }
         model.configure(context)
-        return AntinoteSurfaceController(surface: surface, model: model)
+        return QuickNoteSurfaceController(surface: surface, model: model)
     }
 
     @MainActor
@@ -58,12 +58,12 @@ public final class AntinoteDockWidgetPlugin: NSObject, VehlaDockWidgetPlugin {
 /// transient fitting size (including the editor's zero intrinsic height) from
 /// collapsing the view while Vehla embeds it in its popup.
 @MainActor
-final class AntinoteSurfaceController: NSViewController {
-    private let hosting: TransparentHostingView<AntinoteRootView>
+final class QuickNoteSurfaceController: NSViewController {
+    private let hosting: TransparentHostingView<QuickNoteRootView>
     private let initialSize: NSSize
 
-    init(surface: VehlaDockWidgetSurface, model: AntinoteModel) {
-        hosting = TransparentHostingView(rootView: AntinoteRootView(surface: surface, model: model))
+    init(surface: VehlaDockWidgetSurface, model: QuickNoteModel) {
+        hosting = TransparentHostingView(rootView: QuickNoteRootView(surface: surface, model: model))
         initialSize = switch surface {
         case .popup: NSSize(width: 760, height: 680)
         case .inline: NSSize(width: 240, height: 48)

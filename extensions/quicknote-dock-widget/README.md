@@ -1,4 +1,4 @@
-# Antinote Dock Widget
+# QuickNote
 
 An independent native scratchpad inside Vehla, inspired by [Antinote](https://antinote.io/). Antinote does **not** need to be installed. Your notes live in Vehla's private package directory and never write back to Antinote.
 
@@ -11,13 +11,15 @@ Open the Dock widget and type. Notes autosave after a short pause and flush when
 - **⌘⇧1** promotes the current scratch note. **⌘D** confirms moving it to **The Void**. Restore from the Void tab; no automatic permanent deletion.
 - **Keep** assigns one of nine permanent slots. Occupied slots are protected. Slots never expire; set optional scratch note expiry from the menu (default: Never).
 - **⌘S** exports text. The menu also exports Markdown and a complete JSON library backup, copies text, sends a note to Vehla Notes, and opens find/replace (**⌘⇧F**, literal matching with optional case sensitivity).
-- The menu adjusts text size and lined paper. Colors follow Vehla's live theme; Dock tile text follows Vehla's contrast preference.
+- The menu adjusts text size and lined paper. Colors follow Vehla's live theme; Dock tile text follows Vehla's contrast preference. Opening or editing a note never copies it or publishes it to Vehla's shared context/Notch; Copy and Send to Vehla Notes are explicit actions.
 
 ## Text tools
 
+Type `/` at the start of a line for native command completion (arrow keys and Tab/Return select; Escape dismisses). Supported commands are `/list`, `/math`, `/sum`, `/average`, `/count`, `/code`, `/text`, `/checkbox`, `/bullet`, `/numbered`, `/date`, `/time`, `/new`, `/search`, `/copy`, `/paste`, `/timer`, `/import` and `/export`. Press Return on a completed command to execute it. Timer arguments work as `/timer 5: Tea`. Unknown commands remain literal text.
+
 Start a note with `list`, `math`, `sum`, `average`, `count` or `code`, optionally followed by `: A title`.
 
-Checklists accept `[]`, `[ ]`, `[x]`, `- [ ]` and `- [x]`. Click the checkbox to toggle. In a `list` note, Return converts the line you just wrote into a checkbox and continues the list. Markdown bullet and numbered markers also continue on Return; a blank item exits the list. Tab/Shift-Tab indent/outdent. Plain text stays the source of truth. Headings, bold, italic, underline, strikethrough and comments get subtle native styling. **⌘B / ⌘I / ⌘U** wrap selected text. Code notes use a monospaced font and preserve pasted indentation. HTTP(S) links are clickable; **⌘Return** opens the link under the caret through Vehla.
+Checklists accept `[]`, `[ ]`, `[x]`, `- [ ]` and `- [x]`. Click the checkbox to toggle. List notes keep their first line as the title. Plain nonempty body lines receive implicit checkboxes; numbered/bulleted rows, headings and `//` comments do not. Type `/x` at the end of an item to check or uncheck it; the trigger disappears. Item text and checkbox positions stay stable during ordinary typing. Markdown bullet and numbered markers also continue on Return; a blank item exits the list. Tab/Shift-Tab indent/outdent. Plain text stays the source of truth. Headings, bold, italic, underline, strikethrough and comments get subtle native styling. **⌘B / ⌘I / ⌘U** wrap selected text. Code notes use a monospaced font and preserve pasted indentation. HTTP(S) links are clickable; **⌘Return** opens the link under the caret through Vehla.
 
 Math supports arithmetic, parentheses, powers, percentages (`100 + 15% =`, `50% of 200 =`), variables (`price = 4.5`, then `price * 6 =`), pi, sqrt, abs, ceil, floor, log, log2, sin and cos. End an expression with `=`; results appear inline beside each expression without modifying your text. Answers follow the last visual line when an expression wraps, and the last answers stay visible until recalculation completes. `//` comments are ignored. Supported unit conversions use `10 km to mi =`: m/cm/mm/km/in/ft/yd/mi, g/kg/lb/oz, ml/l/gal (US), s/min/h, and C/F. Currency exchange and arbitrary prose math are not implemented; unsupported expressions explicitly show “Check expression”. Sum/average extract numbers from non-comment lines. Count reports words, characters and lines.
 
@@ -46,13 +48,18 @@ This is a Dock widget, not Antinote binary compatibility. Vehla owns window plac
 macOS 14+, Apple silicon, Swift 6+ with the full Xcode developer tools selected:
 
 ```sh
-swift test --package-path extensions/antinote-dock-widget
-zsh extensions/antinote-dock-widget/build.sh
-swift run --package-path sdk/swift vehla-swift validate extensions/antinote-dock-widget/dist/Antinote
+swift test --package-path extensions/quicknote-dock-widget
+zsh extensions/quicknote-dock-widget/build.sh
+swift run --package-path sdk/swift vehla-swift validate extensions/quicknote-dock-widget/dist/QuickNote
 ```
 
 On this machine, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is needed for tests because the selected Command Line Tools installation lacks complete test plugins. The release build uses the native SwiftPM backend, matching the Research widget.
 
-Install `dist/Antinote` through **Vehla Settings → Store → Install Local Package**, then enable the widget in **Dock Widgets**. Reinstall after rebuilding: Vehla uses its installed copy. Quit and reopen Vehla after updating a previously loaded native bundle; in-process modules remain loaded until the host exits. If both Vehla and Vehla Alpha are running, restart both. A stale loaded descriptor can produce a metadata mismatch even when the installed manifest and binary match. The build produces an arm64, ad-hoc signed bundle linked to Vehla's embedded SDK framework. Existing published 1.1.1 archives are retained; 2.0.6 is submitted for source review. Catalog publication requires an immutable 2.0.6 archive signed with the existing publisher identity; the retained 1.1.1 release is not a substitute for this build.
+Install `dist/QuickNote` through **Vehla Settings → Store → Install Local Package**, then enable the widget in **Dock Widgets**. Reinstall after rebuilding: Vehla uses its installed copy. Quit and reopen Vehla after updating a previously loaded native bundle; in-process modules remain loaded until the host exits. If both Vehla and Vehla Alpha are running, restart both. A stale loaded descriptor can produce a metadata mismatch even when the installed manifest and binary match. The build produces an arm64, ad-hoc signed bundle linked to Vehla's embedded SDK framework. Historical signed 1.1.1 archives are retained; 2.1.0 is submitted for source review. Catalog publication requires an immutable 2.1.0 archive signed with the existing publisher identity; the retained 1.1.1 release is not a substitute for this build.
 
 See [architecture and research notes](docs/ARCHITECTURE.md) for inspected sources, SDK contracts and design decisions. Tests cover database compatibility, persistence/recovery, absent Antinote, import idempotency, slot/expiry safety, math/search, native list editing, host bridge use, close-time saves and offscreen rendering. Actual popup routing and file-panel behavior still need checking in an installed Vehla build.
+
+
+QuickNote uses the package identity `com.wiseman.vehla.quicknote`. On its first run, its storage actor copies the previous widget library from the sibling `com.wiseman.vehla.antinote` data directory, preserving note identities, text, slots, trash, selection, settings and import history. Existing QuickNote data takes precedence; the original files remain intact. A damaged old library reports an error rather than silently replacing notes with tutorials; its valid recovery snapshot is available through Recover Previous Save.
+
+Automatic Apple Notes sync is intentionally absent: supported interfaces do not provide verified preservation of live math, native checklist state and QuickNote commands. See [Apple Notes compatibility research](docs/APPLE_NOTES_COMPATIBILITY.md). Text/Markdown export remains available.

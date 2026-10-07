@@ -1,0 +1,40 @@
+name: QuickNote
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/quicknote-dock-widget.yml"
+      - "extensions/quicknote-dock-widget/**"
+      - "sdk/swift/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/quicknote-dock-widget.yml"
+      - "extensions/quicknote-dock-widget/**"
+      - "sdk/swift/**"
+
+concurrency:
+  group: quicknote-dock-widget-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build, and validate QuickNote
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: swift test --package-path extensions/quicknote-dock-widget
+
+      - name: Build widget bundle
+        run: zsh extensions/quicknote-dock-widget/build.sh
+
+      - name: Validate widget package
+        run: |
+          swift run --package-path sdk/swift vehla-swift validate \
+            extensions/quicknote-dock-widget/dist/QuickNote
