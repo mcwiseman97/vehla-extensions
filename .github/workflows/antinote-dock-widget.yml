@@ -1,0 +1,40 @@
+name: Antinote Dock Widget
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/antinote-dock-widget.yml"
+      - "extensions/antinote-dock-widget/**"
+      - "sdk/swift/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/antinote-dock-widget.yml"
+      - "extensions/antinote-dock-widget/**"
+      - "sdk/swift/**"
+
+concurrency:
+  group: antinote-dock-widget-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build, and validate Antinote
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: swift test --package-path extensions/antinote-dock-widget
+
+      - name: Build widget bundle
+        run: zsh extensions/antinote-dock-widget/build.sh
+
+      - name: Validate widget package
+        run: |
+          swift run --package-path sdk/swift vehla-swift validate \
+            extensions/antinote-dock-widget/dist/Antinote

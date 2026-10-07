@@ -1,0 +1,22 @@
+{
+  "apiVersion": 3,
+  "id": "com.ibuhs.vehla.antinote",
+  "name": "Antinote Dock Widget",
+  "version": "1.1.1",
+  "description": "Read and edit Antinote notes beside the Dock.",
+  "author": "ibuhs",
+  "runtime": "dockWidget",
+  "entrypoint": "bin/AntinoteDockWidget.bundle",
+  "capabilities": ["persistentStorage", "openURL"],
+  "dockWidgets": [
+    {
+      "id": "antinote",
+      "title": "Antinote",
+      "subtitle": "Notes from Antinote",
+      "systemImage": "note.text",
+      "preferredPopupWidth": 760,
+      "preferredPopupHeight": 680,
+      "supportedSurfaces": ["compact", "inline", "popup"]
+    }
+  ]
+}
