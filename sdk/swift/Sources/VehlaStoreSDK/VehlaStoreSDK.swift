@@ -11,6 +11,10 @@ public enum StoreCapability: String, Codable, CaseIterable, Hashable, Sendable {
     case userSelectedFiles
     case networkAccess
     case persistentStorage
+    /// Dock Widget SDK v2 app-bridge permissions, also used by manifest validation.
+    case sharedContextRead
+    case sharedContextPublish
+    case appActions
 }
 
 public struct StoreSelectedFile: Codable, Hashable, Sendable {

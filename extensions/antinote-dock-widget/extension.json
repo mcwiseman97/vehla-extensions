@@ -2,21 +2,33 @@
   "apiVersion": 3,
   "id": "com.wiseman.vehla.antinote",
   "name": "Antinote Dock Widget",
-  "version": "1.1.1",
-  "description": "Read and edit Antinote notes beside the Dock.",
+  "version": "2.0.6",
+  "description": "A native scratchpad with checklists, calculations, capture, permanent slots and safe Antinote import.",
   "author": "Michael Wiseman",
   "runtime": "dockWidget",
   "entrypoint": "bin/AntinoteDockWidget.bundle",
-  "capabilities": ["persistentStorage", "openURL"],
+  "capabilities": [
+    "persistentStorage",
+    "openURL",
+    "clipboardRead",
+    "clipboardWrite",
+    "userSelectedFiles",
+    "sharedContextPublish",
+    "appActions"
+  ],
   "dockWidgets": [
     {
       "id": "antinote",
       "title": "Antinote",
-      "subtitle": "Notes from Antinote",
+      "subtitle": "A scratchpad for the present moment",
       "systemImage": "note.text",
       "preferredPopupWidth": 760,
       "preferredPopupHeight": 680,
-      "supportedSurfaces": ["compact", "inline", "popup"]
+      "supportedSurfaces": [
+        "compact",
+        "inline",
+        "popup"
+      ]
     }
   ]
 }

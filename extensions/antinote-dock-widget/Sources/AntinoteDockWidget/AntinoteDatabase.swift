@@ -171,6 +171,12 @@ enum AntinoteDatabase {
         let extensions: Set<String> = ["sqlite", "sqlite3", "db", "store"]
         let skipped: Set<String> = ["Caches", "WebKit", "HTTPStorages", "Logs", "Saved Application State"]
         var results: [Discovery] = []
+        // Known paths still work when macOS denies enumerating the container.
+        for candidate in candidates(home: home) {
+            if FileManager.default.fileExists(atPath: candidate.url.path) {
+                results.append(inspect(candidate.url))
+            }
+        }
         for root in roots {
             guard let walker = FileManager.default.enumerator(
                 at: root,
@@ -178,6 +184,7 @@ enum AntinoteDatabase {
                 options: [.skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in walker {
+                if Task.isCancelled { return results }
                 if skipped.contains(url.lastPathComponent) {
                     walker.skipDescendants()
                     continue
@@ -188,7 +195,7 @@ enum AntinoteDatabase {
                     continue
                 }
                 guard values?.isRegularFile == true, extensions.contains(url.pathExtension.lowercased()) else { continue }
-                results.append(inspect(url))
+                if !results.contains(where: { $0.url == url }) { results.append(inspect(url)) }
             }
         }
         return results
@@ -598,6 +605,7 @@ private final class SQLiteDB {
         let hasCreated = append(columns.created)
         let hasModified = append(columns.modified)
         let hasSlot = append(columns.slotIndex)
+        let hasSlotted = append(columns.slotted)
         var sql = "SELECT \(fields.joined(separator: ", ")) FROM notes"
         var filters: [String] = []
         if let deleted = columns.deleted, let quoted = AntinoteDatabase.quote(deleted) {
@@ -609,21 +617,36 @@ private final class SQLiteDB {
         if hasModified, let modified = columns.modified, let quoted = AntinoteDatabase.quote(modified) {
             sql += " ORDER BY \(quoted) DESC"
         }
-        sql += " LIMIT 1000"
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         guard let statement else { return [] }
         defer { sqlite3_finalize(statement) }
         var notes: [AntinoteNote] = []
+        var totalBytes = 0
         while try step(statement) {
+            try Task.checkCancellation()
             var index: Int32 = 2
             let created = hasCreated ? AntinoteTimestamp.date(from: value(statement, index)) : nil
             if hasCreated { index += 1 }
             let modified = hasModified ? AntinoteTimestamp.date(from: value(statement, index)) : nil
             if hasModified { index += 1 }
-            let slot = hasSlot ? int(statement, index) : nil
+            let slotIndex = hasSlot ? int(statement, index) : nil
+            if hasSlot { index += 1 }
+            let slotted = hasSlotted ? int(statement, index) : 1
+            let slot = slotted == 0 ? nil : slotIndex
+            totalBytes += Int(sqlite3_column_bytes(statement, 1))
+            guard totalBytes <= 100 * 1_024 * 1_024 else { throw AntinoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
+            guard sqlite3_column_bytes(statement, 1) <= AntinoteDatabase.contentLimit else {
+                throw AntinoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
+            }
+            guard notes.count < 50_000 else { throw AntinoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
+            guard [SQLITE_TEXT, SQLITE_NULL].contains(sqlite3_column_type(statement, 1)) else {
+                throw AntinoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
+            }
+            let noteID = sqlite3_column_type(statement, 0) == SQLITE_INTEGER ? text(statement, 0) : identifier(statement, 0)
+            guard let noteID, !noteID.isEmpty else { throw AntinoteDatabaseError.unsupported("An Antinote note has an unsupported identifier.") }
             notes.append(AntinoteNote(
-                id: text(statement, 0),
+                id: noteID,
                 content: text(statement, 1),
                 created: created,
                 modified: modified,
@@ -648,13 +671,14 @@ private final class SQLiteDB {
             sql += " WHERE ZSOFTDELETED IS NULL OR ZSOFTDELETED = 0"
         }
         if hasModified { sql += " ORDER BY ZLASTMODIFIED DESC" }
-        sql += " LIMIT 1000"
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         guard let statement else { return [] }
         defer { sqlite3_finalize(statement) }
         var notes: [AntinoteNote] = []
+        var totalBytes = 0
         while try step(statement) {
+            try Task.checkCancellation()
             guard let id = identifier(statement, 0) else { continue }
             var index: Int32 = 2
             let created = hasCreated ? AntinoteTimestamp.date(from: value(statement, index)) : nil
@@ -664,6 +688,15 @@ private final class SQLiteDB {
             let slotIndex = hasSlot ? int(statement, index) : nil
             if hasSlot { index += 1 }
             let slotted = hasSlotted ? int(statement, index) : 1
+            totalBytes += Int(sqlite3_column_bytes(statement, 1))
+            guard totalBytes <= 100 * 1_024 * 1_024 else { throw AntinoteDatabaseError.unsupported("Import exceeds 100 MiB of note text.") }
+            guard sqlite3_column_bytes(statement, 1) <= AntinoteDatabase.contentLimit else {
+                throw AntinoteDatabaseError.unsupported("An imported note exceeds the 2 MB note limit.")
+            }
+            guard notes.count < 50_000 else { throw AntinoteDatabaseError.unsupported("Import supports 50,000 notes at once.") }
+            guard [SQLITE_TEXT, SQLITE_NULL].contains(sqlite3_column_type(statement, 1)) else {
+                throw AntinoteDatabaseError.unsupported("An Antinote note is not stored as plain text.")
+            }
             notes.append(AntinoteNote(
                 id: id,
                 content: text(statement, 1),

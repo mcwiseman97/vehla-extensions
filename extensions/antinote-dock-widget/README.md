@@ -1,25 +1,58 @@
 # Antinote Dock Widget
 
-Read and edit [Antinote](https://antinote.io) notes beside Vehla’s Dock. The compact tile shows how many notes are stored. The inline row shows the current note and can open it in Antinote. The popup searches notes, edits the text, and creates a new note.
+An independent native scratchpad inside Vehla, inspired by [Antinote](https://antinote.io/). Antinote does **not** need to be installed. Your notes live in Vehla's private package directory and never write back to Antinote.
 
-Antinote keeps notes in a SQLite file inside its app container. Click the note on the right and type. Vehla’s popup keeps keyboard focus for itself, so the editor takes key presses directly and draws its own caret. ⌘S, Save, switching notes or closing the popup sends the text to Antinote. New starts a blank note in the same editor; ⌘S, Save, picking another note or closing the popup creates it in Antinote in the background. Open shows the note in Antinote. Lines that start with Antinote’s checkbox markers (`[]`, `- [ ]`, `[x]`, `- [x]`) show a checkbox; clicking it checks or unchecks the item and saves right away.
-Antinote keeps notes in memory and ignores outside writes to its database, so the widget never writes the database. To save, it uses Accessibility to replace the text in Antinote’s editor, then waits until Antinote has written it to its database. If Antinote is showing a different note, the widget first switches it with `promoteAndOpen`. Antinote brings itself forward whenever it handles a link, so when it was hidden or had no window open the widget hides it again the instant it appears (about one frame) and finishes the save through Accessibility while it stays hidden, then returns focus to the previous app. New works the same way. If Antinote shows text the widget does not expect, nothing is overwritten. Vehla needs Accessibility permission for this. Open and New talk to Antinote directly: macOS may ask once for permission to let Vehla control Antinote. Closing the widget asks Antinote to reload notes that changed.
+## Use
 
-Vehla needs **Full Disk Access**. macOS otherwise blocks reads of another app’s container. Grant it in System Settings → Privacy & Security → Full Disk Access, then fully quit and reopen Vehla.
+Open the Dock widget and type. Notes autosave after a short pause and flush when the widget hides or closes. The first run includes five editable tutorials for writing, checklists, calculations, capture and importing. New notes need no name: the first line becomes their title.
 
-If iCloud sync is on, a newer cloud copy can still merge over a local edit. If Antinote changes a note while you are editing it, the popup asks whether to keep your text or take Antinote’s.
+- **⌘N** creates a note. **⌘[ / ⌘]** and two-finger horizontal swipes over the editor navigate older/newer notes; passing the newest creates a blank note. Swipes commit once when fingers lift; short or cancelled gestures and scroll momentum do not switch notes. Vertical gestures scroll the note normally. Leaving an empty scratch note removes it.
+- **⌘F** opens the search pane. Search Stack, Slots or Void. Return opens the first match, or creates a note from an unmatched query.
+- **⌘⇧1** promotes the current scratch note. **⌘D** confirms moving it to **The Void**. Restore from the Void tab; no automatic permanent deletion.
+- **Keep** assigns one of nine permanent slots. Occupied slots are protected. Slots never expire; set optional scratch note expiry from the menu (default: Never).
+- **⌘S** exports text. The menu also exports Markdown and a complete JSON library backup, copies text, sends a note to Vehla Notes, and opens find/replace (**⌘⇧F**, literal matching with optional case sensitivity).
+- The menu adjusts text size and lined paper. Colors follow Vehla's live theme; Dock tile text follows Vehla's contrast preference.
+
+## Text tools
+
+Start a note with `list`, `math`, `sum`, `average`, `count` or `code`, optionally followed by `: A title`.
+
+Checklists accept `[]`, `[ ]`, `[x]`, `- [ ]` and `- [x]`. Click the checkbox to toggle. In a `list` note, Return converts the line you just wrote into a checkbox and continues the list. Markdown bullet and numbered markers also continue on Return; a blank item exits the list. Tab/Shift-Tab indent/outdent. Plain text stays the source of truth. Headings, bold, italic, underline, strikethrough and comments get subtle native styling. **⌘B / ⌘I / ⌘U** wrap selected text. Code notes use a monospaced font and preserve pasted indentation. HTTP(S) links are clickable; **⌘Return** opens the link under the caret through Vehla.
+
+Math supports arithmetic, parentheses, powers, percentages (`100 + 15% =`, `50% of 200 =`), variables (`price = 4.5`, then `price * 6 =`), pi, sqrt, abs, ceil, floor, log, log2, sin and cos. End an expression with `=`; results appear inline beside each expression without modifying your text. Answers follow the last visual line when an expression wraps, and the last answers stay visible until recalculation completes. `//` comments are ignored. Supported unit conversions use `10 km to mi =`: m/cm/mm/km/in/ft/yd/mi, g/kg/lb/oz, ml/l/gal (US), s/min/h, and C/F. Currency exchange and arbitrary prose math are not implemented; unsupported expressions explicitly show “Check expression”. Sum/average extract numbers from non-comment lines. Count reports words, characters and lines.
+
+Type `paste` on a line and press Return to start **AutoPaste**. `paste( | )` uses a custom separator. Copies append through Vehla's canonical clipboard history, with a plain-text pasteboard fallback on older hosts. Capture is opt-in and stops on Escape, changing notes, hiding or closing the widget. Paste/drop an image for local macOS Vision OCR. Image file reading and recognition run off MainActor; images are not stored or uploaded.
+
+Type `timer 5: Tea` or `timer 3:30` on a line and press Return to start a **Vehla timer**. Vehla owns countdowns, notifications and their lifetime, including after the popup closes. `timer pomo` starts a 25-minute focus countdown; break cycles remain under Vehla's timer controls. `timer` starts an in-widget stopwatch; `timer p/r/s` pause/resume, restart and stop it. Older hosts without the app bridge show a clear unavailable message for countdowns and Send to Notes.
+
+## Import Notes
+
+Choose **Import Notes** from the menu or footer. The importer detects stable and Setapp installations separately from stored data, so notes left behind after uninstall can still be imported. It reuses this project's existing Antinote database discovery, modern `notes` parser and legacy Core Data `ZNOTE` parser, including UUID blob identifiers, timestamp decoding and deleted-note filtering.
+
+The preview shows note titles, previews and already-imported identities. Select some or all, then Import. Source databases remain read-only; importing again skips existing identities, preserves local edits and keeps duplicates out even after a note moves to the Void. Dates and permanent slots are preserved. A slot collision puts the imported note in the scratch stack. The former reader's silent 1,000-note limit is removed; explicit limits are 50,000 notes, 2 MB per note and 100 MiB of imported note text.
+
+If no app/database/notes are found, tutorials remain available and the import sheet explains the state. **Choose Files** accepts Antinote SQLite/SQLite3/DB backups, UTF-8 `.txt`/`.md` exports, and this widget's JSON backups. No Antinote launch, Accessibility, Automation permission, shell command or database mutation is used by this flow. Container access may require granting Vehla Full Disk Access and restarting Vehla. Choosing readable exported files or a backup is an alternative.
+
+## Storage and lifecycle
+
+`scratchpad.json` and `scratchpad.previous.json` are stored under `context.dataDirectory`. Atomic writes are serialized by a repository actor and stale revisions cannot overwrite newer ones. Corrupt data surfaces an error rather than silently replacing notes with tutorials. **Recover Previous Save** restores the prior valid library; export a backup before intentionally recovering. JSON import merges instead of overwriting.
+
+The plugin retains one model across compact, inline and popup controllers. AppKit drawing, responder routing, pasteboard reads, native panels and brokered host actions stay on MainActor. Filesystem discovery, SQLite reading, import merging, JSON encode/decode, atomic writes, search, calculations, text-style parsing and OCR run on actors or worker tasks. Visibility work is cancelled on hide; accepted saves drain without blocking lifecycle callbacks. Keyboard monitors are removed on detachment and explicitly yield to other text fields. Undo history resets when the selected note changes.
+
+This is a Dock widget, not Antinote binary compatibility. Vehla owns window placement, activation and shortcuts. Separate application windows, global extension hotkeys, iCloud sync, Antinote's JavaScript marketplace, Vim editing, split-screen editing, live currency rates and PDF export are outside this implementation. All exposed controls perform real operations.
 
 ## Build and install
 
-Requires macOS 14+, Apple silicon, and Swift 6+.
+macOS 14+, Apple silicon, Swift 6+ with the full Xcode developer tools selected:
 
 ```sh
 swift test --package-path extensions/antinote-dock-widget
 zsh extensions/antinote-dock-widget/build.sh
-swift run --package-path sdk/swift vehla-swift validate \
-  extensions/antinote-dock-widget/dist/Antinote
+swift run --package-path sdk/swift vehla-swift validate extensions/antinote-dock-widget/dist/Antinote
 ```
 
-In Vehla, choose **Settings → Store → Install Local Package**, select `dist/Antinote`, then enable Antinote in **Settings → Dock Widgets**.
+On this machine, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` is needed for tests because the selected Command Line Tools installation lacks complete test plugins. The release build uses the native SwiftPM backend, matching the Research widget.
 
-The widget does not copy notes into its own storage. Uninstalling it leaves Antinote’s database where it is. The only file it writes under Vehla’s package data directory is the id of the note you last selected.
+Install `dist/Antinote` through **Vehla Settings → Store → Install Local Package**, then enable the widget in **Dock Widgets**. Reinstall after rebuilding: Vehla uses its installed copy. Quit and reopen Vehla after updating a previously loaded native bundle; in-process modules remain loaded until the host exits. If both Vehla and Vehla Alpha are running, restart both. A stale loaded descriptor can produce a metadata mismatch even when the installed manifest and binary match. The build produces an arm64, ad-hoc signed bundle linked to Vehla's embedded SDK framework. Existing published 1.1.1 archives are retained; 2.0.6 is submitted for source review. Catalog publication requires an immutable 2.0.6 archive signed with the existing publisher identity; the retained 1.1.1 release is not a substitute for this build.
+
+See [architecture and research notes](docs/ARCHITECTURE.md) for inspected sources, SDK contracts and design decisions. Tests cover database compatibility, persistence/recovery, absent Antinote, import idempotency, slot/expiry safety, math/search, native list editing, host bridge use, close-time saves and offscreen rendering. Actual popup routing and file-panel behavior still need checking in an installed Vehla build.

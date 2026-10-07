@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added the documented Dock Widget app-bridge permissions to `StoreCapability`
+  so manifests using shared context and app actions decode in the Swift CLI.
 - Published `VehlaNativeUISDK` for Store API 2 hosted SwiftUI/AppKit workspaces.
 - Published `VehlaDockWidgetSDK` for Store API 3 compact, inline, and popup
   Dock widget surfaces.

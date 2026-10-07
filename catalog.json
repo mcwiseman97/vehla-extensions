@@ -3,47 +3,6 @@
   "packages": [
     {
       "manifest": {
-        "apiVersion": 3,
-        "id": "com.wiseman.vehla.antinote",
-        "name": "Antinote Dock Widget",
-        "version": "1.1.1",
-        "description": "Read and edit Antinote notes beside the Dock.",
-        "author": "Michael Wiseman",
-        "runtime": "dockWidget",
-        "entrypoint": "bin/AntinoteDockWidget.bundle",
-        "capabilities": [
-          "persistentStorage",
-          "openURL"
-        ],
-        "dockWidgets": [
-          {
-            "id": "antinote",
-            "title": "Antinote",
-            "subtitle": "Notes from Antinote",
-            "systemImage": "note.text",
-            "preferredPopupWidth": 760,
-            "preferredPopupHeight": 680,
-            "supportedSurfaces": [
-              "compact",
-              "inline",
-              "popup"
-            ]
-          }
-        ]
-      },
-      "archiveURL": "https://raw.githubusercontent.com/ibuhs/vehla-extensions/main/packages/antinote-dock-widget-1.1.1.zip",
-      "sha256": "cfe28e5c729359df711b2841d08d7e440396c281ff83794a99a709c8384aee3b",
-      "archiveRoot": "antinote-dock-widget",
-      "publisher": {
-        "id": "com.wiseman.publisher",
-        "keyID": "release-2026-10",
-        "name": "Michael Wiseman",
-        "publicKey": "nmRkk5loQ0WZxoSG9o4bvERGEseRT5k/tIybSlY2j14="
-      },
-      "signature": "xkId/r9zdsMVHbZFc/p5OJCpiT8Ixn0Mg5boemVlQDH+QinVxr75gw7hj03SmiB/4UpU4p1AHgWIJh5E6P2ZAA=="
-    },
-    {
-      "manifest": {
         "apiVersion": 2,
         "id": "com.ibuhs.vehla.capture-hub",
         "name": "Capture Hub",

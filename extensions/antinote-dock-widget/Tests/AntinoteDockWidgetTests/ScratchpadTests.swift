@@ -1,0 +1,310 @@
+import AppKit
+import Foundation
+import SQLite3
+import Testing
+import VehlaDockWidgetSDK
+@testable import AntinoteDockWidget
+
+@Suite struct ScratchpadTests {
+    private func scratch() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+    @Test func firstRunSeedsOnceAndSavesLatestRevision() async throws {
+        let root = try scratch(); defer { try? FileManager.default.removeItem(at: root) }
+        let repo = ScratchRepository(root: root)
+        var state = try await repo.load()
+        #expect(state.notes.count == 5)
+        let original = state
+        state.notes[0].content = "Actual user note"; state.revision = 2
+        try await repo.save(state)
+        try await repo.save(original)
+        let reopened = try await ScratchRepository(root: root).load()
+        #expect(reopened.notes[0].content == "Actual user note")
+        #expect(reopened.revision == 2)
+    }
+    @Test func corruptPrimaryDoesNotEraseBackup() async throws {
+        let root = try scratch(); defer { try? FileManager.default.removeItem(at: root) }
+        let repo = ScratchRepository(root: root)
+        var state = try await repo.load(); let first = state
+        state.revision += 1; state.notes[0].content = "Second save"
+        try await repo.save(state)
+        try Data("broken json".utf8).write(to: root.appendingPathComponent("scratchpad.json"))
+        let reopened = ScratchRepository(root: root)
+        await #expect(throws: (any Error).self) { try await reopened.load() }
+        let recovered = try await reopened.recover()
+        #expect(recovered.notes == first.notes)
+        #expect(try await ScratchRepository(root: root).load().notes == first.notes)
+    }
+    @Test func importNeverOverwritesAndSlotsDoNotCollide() throws {
+        var state = ScratchLibrary(notes: [ScratchNote(content: "Local permanent", slot: 1)])
+        let source = [ScratchNote(content: "Imported", slot: 1, importKey: "antinote:one"), ScratchNote(content: "Permanent", slot: 2, importKey: "antinote:two")]
+        #expect(ScratchImporter.merge(source, into: &state) == 2)
+        #expect(state.notes[1].slot == nil)
+        #expect(state.notes[2].slot == 2)
+        state.notes[1].content = "Edited locally"; state.notes[1].deleted = Date()
+        #expect(ScratchImporter.merge(source, into: &state) == 0)
+        #expect(state.notes[1].content == "Edited locally")
+        try state.validate()
+    }
+    @Test func missingAntinoteIsUsefulAndTextImportsDeduplicate() async throws {
+        let home = try scratch(); defer { try? FileManager.default.removeItem(at: home) }
+        let importer = ScratchImporter()
+        let absent = try await importer.discover(home: home, installed: false)
+        #expect(absent.notes.isEmpty)
+        #expect(absent.message.contains("not installed"))
+        let installed = try await importer.discover(home: home, installed: true)
+        #expect(installed.message.contains("is installed"))
+        let url = home.appendingPathComponent("Note.md")
+        try Data("# Imported\nBody".utf8).write(to: url)
+        let preview = try await importer.files([url, url])
+        var state = ScratchLibrary()
+        #expect(ScratchImporter.merge(preview.notes, into: &state) == 1)
+    }
+    @Test func expiryProtectsSlotsAndTrashIsRecoverable() throws {
+        let now = Date(), old = now.addingTimeInterval(-10 * 86_400)
+        var state = ScratchLibrary(notes: [ScratchNote(content: "Temporary", modified: old), ScratchNote(content: "Permanent", modified: old, slot: 1)], expiryDays: 7)
+        state.expire(now: now)
+        #expect(state.notes[0].deleted == now)
+        #expect(state.notes[0].content == "Temporary")
+        #expect(state.notes[1].deleted == nil)
+    }
+    @Test func calculationsVariablesUnitsAndInvalidExpressions() async throws {
+        var parser = MathParser("100 + 15%")
+        #expect(try parser.evaluate() == 115)
+        parser = MathParser("50% of 200")
+        #expect(try parser.evaluate() == 100)
+        parser = MathParser("2^3^2")
+        #expect(try parser.evaluate() == 512)
+        parser = MathParser("sqrt(16) + 2 * 3")
+        #expect(try parser.evaluate() == 10)
+        parser = MathParser("1 / 0")
+        #expect(throws: (any Error).self) { try parser.evaluate() }
+        parser = MathParser("someFunction(123)")
+        #expect(throws: (any Error).self) { try parser.evaluate() }
+        let tools = ScratchTools()
+        let result = try await tools.analyze("math\ncoffee = 4.5\npeople = 6\ncoffee * people =\n10 km to mi =")
+        #expect(result.results[2].contains("27"))
+        #expect(result.results[3].contains("6.213712 mi"))
+        #expect(result.mathResults[2].answer == "27")
+        #expect((result.source as NSString).substring(with: result.mathResults[2].range) == "coffee * people =")
+        let unicode = try await tools.analyze("math: ☕️\r\nprice = 4\r\nprice * 2 =")
+        #expect((unicode.source as NSString).substring(with: unicode.mathResults.last!.range) == "price * 2 =")
+        let sum = try await tools.analyze("sum\nTrain 28\nLunch 16.50\n// ignore 100")
+        #expect(sum.results.first?.contains("44.5") == true)
+    }
+    @Test func searchScopesDoNotLeakTrashOrSlots() async throws {
+        let notes = [ScratchNote(content: "Apple"), ScratchNote(content: "Apple", slot: 1), ScratchNote(content: "Apple", deleted: Date())]
+        let tools = ScratchTools()
+        #expect(try await tools.search(notes, query: "APPLE", scope: "stack") == [notes[0].id])
+        #expect(try await tools.search(notes, query: "apple", scope: "slots") == [notes[1].id])
+        #expect(try await tools.search(notes, query: "apple", scope: "void") == [notes[2].id])
+    }
+    @Test func timersParseWithoutAmbiguousLabelColons() {
+        #expect(ScratchTimerCommand.parse("timer")?.duration == nil)
+        #expect(ScratchTimerCommand.parse("timer 3:30")?.duration == 210)
+        #expect(ScratchTimerCommand.parse("timer 5: Tea: then laundry")?.label == "Tea: then laundry")
+        #expect(ScratchTimerCommand.parse("timer 5: Tea")?.duration == 300)
+        #expect(ScratchTimerCommand.parse("timer invalid") == nil)
+    }
+    @Test func modernImportReadsAllRowsAndHonorsSlottedFlag() async throws {
+        let root = try scratch(); defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("notes.sqlite3")
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
+        let database = try #require(handle)
+        defer { sqlite3_close(database) }
+        let sql = """
+        CREATE TABLE notes (id TEXT PRIMARY KEY, content TEXT, slotIndex INTEGER, isSlotted INTEGER, softDeleted INTEGER);
+        WITH RECURSIVE counter(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM counter WHERE x < 1500)
+        INSERT INTO notes SELECT 'note-' || x, 'Text ' || x, 0, 0, 0 FROM counter;
+        INSERT INTO notes VALUES ('permanent', 'Keep this', 2, 1, 0);
+        INSERT INTO notes VALUES ('deleted', 'Hidden', 0, 0, 1);
+        """
+        #expect(sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK)
+        let before = try Data(contentsOf: url)
+        let preview = try await ScratchImporter().database(url)
+        #expect(preview.notes.count == 1501)
+        #expect(preview.notes.first(where: { $0.content == "Text 1" })?.slot == nil)
+        #expect(preview.notes.first(where: { $0.content == "Keep this" })?.slot == 3)
+        #expect(try Data(contentsOf: url) == before)
+    }
+
+    @Test func invalidLibraryRejectsDuplicateIDsAndOversizedText() {
+        var library = ScratchLibrary(notes: [ScratchNote(id: "a", content: "1"), ScratchNote(id: "a", content: "2")])
+        #expect(throws: (any Error).self) { try library.validate() }
+        library.notes = [ScratchNote(content: String(repeating: "a", count: 2_000_001))]
+        #expect(throws: (any Error).self) { try library.validate() }
+    }
+}
+
+@Suite(.serialized) @MainActor struct ScratchpadIntegrationTests {
+    private func waitReady(_ model: AntinoteModel) async throws {
+        for _ in 0..<100 {
+            if model.ready { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw ScratchError.message("Model failed to load: \(model.status ?? "unknown")")
+    }
+    @Test func hostBridgesAndCloseFlush() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let theme = VehlaDockWidgetTheme(isDark: false, accentColor: .systemBlue, primaryTextColor: .labelColor,
+                                        secondaryTextColor: .secondaryLabelColor, surfaceColor: .windowBackgroundColor)
+        var actions: [VehlaDockWidgetAction] = []
+        var published: VehlaDockWidgetSharedContext?
+        var timerDuration: TimeInterval?
+        let app = VehlaDockWidgetAppBridge(currentContextHandler: { nil }, publishHandler: { published = $0; return true },
+                                          actionHandler: { _, _ in true }, timerHandler: { _, duration, _ in timerDuration = duration; return true })
+        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "antinote", dataDirectory: root, theme: theme,
+                                             app: app, invalidationHandler: {}, actionHandler: { actions.append($0) })
+        let model = AntinoteModel(); model.configure(context)
+        try await waitReady(model)
+        model.startNewNote(); model.inlineEdited("Saved on immediate close")
+        let id = model.selectedID
+        model.publish(); #expect(published?.body == "Saved on immediate close")
+        model.copyDraft(); #expect(actions.count == 1)
+        #expect(model.command("timer 3:30: Tea"))
+        #expect(timerDuration == 210)
+        _ = model.command("paste"); #expect(model.autoPaste)
+        model.close(); #expect(!model.autoPaste); #expect(model.context == nil)
+        for _ in 0..<100 {
+            if let reopened = try? await ScratchRepository(root: root).load(), reopened.notes.first(where: { $0.id == id })?.content == "Saved on immediate close" { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        Issue.record("Closing did not flush the accepted edit")
+    }
+    @Test func nativeEditorContinuesListsAndHasUndo() {
+        let view = InlineTextView(usingTextLayoutManager: false)
+        view.allowsUndo = true
+        view.string = "list: Today\nBuy milk"
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.insertNewline(nil)
+        #expect(view.string == "list: Today\n[] Buy milk\n[] ")
+        view.string = "- [x] Done"; view.setSelectedRange(NSRange(location: 10, length: 0))
+        view.insertNewline(nil)
+        #expect(view.string == "- [x] Done\n- [ ] ")
+        view.detach()
+    }
+    @Test func headingStylingDoesNotTurnBodyTextBold() async throws {
+        let view = InlineTextView(usingTextLayoutManager: false)
+        view.string = "# Heading\nPlain body"
+        view.restyle()
+        try await Task.sleep(for: .milliseconds(180))
+        view.restyle()
+        try await Task.sleep(for: .milliseconds(180))
+        let font = try #require(view.textStorage?.attribute(.font, at: 12, effectiveRange: nil) as? NSFont)
+        #expect(font.pointSize == 15)
+        #expect(!NSFontManager.shared.traits(of: font).contains(.boldFontMask))
+        view.detach()
+    }
+
+    @Test func twoFingerNavigationCommitsOnceAndIgnoresMomentum() {
+        var tracker = NoteSwipeTracker()
+        #expect(tracker.step(x: 0, y: 0, phase: .began) == .passThrough)
+        #expect(tracker.step(x: 35, y: 2, phase: .changed) == .consume)
+        #expect(tracker.step(x: 40, y: 1, phase: .changed) == .consume)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(1))
+        #expect(tracker.step(x: 100, y: 0, phase: [], momentum: .began) == .consume)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) != .navigate(1))
+        _ = tracker.step(x: 0, y: 0, phase: .began)
+        _ = tracker.step(x: -75, y: 0, phase: .changed)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(-1))
+    }
+
+    @Test func verticalShortCancelledAndMouseGesturesDoNotNavigate() {
+        var tracker = NoteSwipeTracker()
+        _ = tracker.step(x: 0, y: 0, phase: .began)
+        #expect(tracker.step(x: 1, y: 20, phase: .changed) == .passThrough)
+        #expect(tracker.step(x: 100, y: 1, phase: .changed) == .passThrough)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .passThrough)
+        _ = tracker.step(x: 0, y: 0, phase: .began)
+        _ = tracker.step(x: 20, y: 0, phase: .changed)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .consume)
+        _ = tracker.step(x: 0, y: 0, phase: .began)
+        _ = tracker.step(x: 100, y: 0, phase: .changed)
+        #expect(tracker.step(x: 0, y: 0, phase: .cancelled) == .consume)
+        #expect(tracker.step(x: 0, y: 0, phase: .ended) == .passThrough)
+        #expect(tracker.step(x: 100, y: 0, phase: [], precise: false) == .passThrough)
+    }
+
+    @Test func inlineMathKeepsAnswersDuringEdits() async throws {
+        let editor = InlineTextView(usingTextLayoutManager: false)
+        editor.string = "math\ncoffee = 4.5\npeople = 6\ncoffee * people ="
+        let tools = ScratchTools()
+        editor.mathAnalysis = try await tools.analyze(editor.string)
+        let location = (editor.string as NSString).range(of: "4.5").location
+        editor.insertText("1", replacementRange: NSRange(location: location, length: 0))
+        #expect(editor.mathAnalysis.mathResults.map(\.answer) == ["4.5", "6", "27"])
+        #expect((editor.string as NSString).substring(with: editor.mathAnalysis.mathResults[2].range) == "coffee * people =")
+        editor.mathAnalysis = try await tools.analyze(editor.string)
+        #expect(editor.mathAnalysis.mathResults.map(\.answer) == ["14.5", "6", "87"])
+        editor.detach()
+    }
+
+    @Test func pluginSurfacesRenderAndShareSelection() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = NSApplication.shared
+        let theme = VehlaDockWidgetTheme(isDark: false, accentColor: .systemIndigo, primaryTextColor: .labelColor,
+                                        secondaryTextColor: .secondaryLabelColor, surfaceColor: .windowBackgroundColor)
+        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "antinote", dataDirectory: root, theme: theme,
+                                             invalidationHandler: {}, actionHandler: { _ in })
+        let plugin = AntinoteDockWidgetPlugin()
+        #expect(plugin.apiVersion == VehlaDockWidgetAPIVersion)
+        let popup = try plugin.makeViewController(widgetID: "antinote", surface: .popup, context: context)
+        _ = try plugin.makeViewController(widgetID: "antinote", surface: .compact, context: context)
+        _ = try plugin.makeViewController(widgetID: "antinote", surface: .inline, context: context)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 680), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentViewController = popup
+        popup.view.frame = NSRect(x: 0, y: 0, width: 760, height: 680)
+        try await Task.sleep(for: .milliseconds(450))
+        window.setContentSize(NSSize(width: 760, height: 680))
+        popup.view.frame = NSRect(x: 0, y: 0, width: 760, height: 680)
+        popup.view.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+        popup.view.layoutSubtreeIfNeeded()
+        #expect(popup.view.bounds.width == 760)
+        #expect(popup.view.subviews.count == 1)
+        #expect(popup.view.subviews[0].bounds.width == 760)
+        #expect(popup.view.subviews[0].bounds.height == 680)
+        #expect(!popup.view.subviews[0].isOpaque)
+        func findEditor(_ view: NSView) -> InlineTextView? {
+            if let editor = view as? InlineTextView { return editor }
+            return view.subviews.lazy.compactMap { findEditor($0) }.first
+        }
+        let editor = try #require(findEditor(popup.view))
+        #expect(editor.enclosingScrollView is NoteScrollView)
+        #expect(editor.enclosingScrollView!.bounds.height > 300)
+        #expect(editor.enclosingScrollView!.bounds.width > 500)
+        #expect(editor.string.contains("A little room to think"))
+        if let bitmap = popup.view.bitmapImageRepForCachingDisplay(in: popup.view.bounds) {
+            popup.view.cacheDisplay(in: popup.view.bounds, to: bitmap)
+            #expect(bitmap.pixelsWide > 0)
+            let paperColor = try #require(bitmap.colorAt(x: 380, y: 500))
+            #expect(paperColor.alphaComponent < 0.01)
+            if let data = bitmap.representation(using: .png, properties: [:]) {
+                try data.write(to: URL(fileURLWithPath: "/tmp/vehla-antinote-preview.png"))
+            }
+        } else { Issue.record("Popup could not render") }
+        let mathText = "math: Budget\ncoffee = 4.50\npeople = 6\ncoffee * people =\n(120 + 35) / 2 =\n100 + 15% =\n10 km to mi ="
+        editor.string = mathText
+        editor.mathAnalysis = try await ScratchTools().analyze(mathText)
+        editor.restyle()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(editor.string == mathText)
+        #expect(editor.textContainer!.containerSize.width < editor.bounds.width - 150)
+        if let bitmap = popup.view.bitmapImageRepForCachingDisplay(in: popup.view.bounds) {
+            popup.view.cacheDisplay(in: popup.view.bounds, to: bitmap)
+            if let data = bitmap.representation(using: .png, properties: [:]) {
+                try data.write(to: URL(fileURLWithPath: "/tmp/vehla-antinote-inline-math.png"))
+            }
+        }
+        plugin.widget("antinote", didEnter: .hidden)
+        plugin.widgetWillClose("antinote")
+        window.contentViewController = nil
+    }
+}

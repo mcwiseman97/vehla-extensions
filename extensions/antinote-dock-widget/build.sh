@@ -7,13 +7,13 @@ BUNDLE="$ROOT/bin/AntinoteDockWidget.bundle"
 EXECUTABLE="$BUNDLE/Contents/MacOS/AntinoteDockWidget"
 PACKAGE="$ROOT/dist/Antinote"
 
-swift build \
+swift build --build-system native \
   --package-path "$ROOT" \
   --configuration release \
   --arch arm64 \
   --product "$PRODUCT"
 
-BIN_PATH=$(swift build \
+BIN_PATH=$(swift build --build-system native \
   --package-path "$ROOT" \
   --configuration release \
   --arch arm64 \
@@ -47,9 +47,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.1</string>
+    <string>2.0.6</string>
     <key>CFBundleVersion</key>
-    <string>12</string>
+    <string>19</string>
     <key>NSPrincipalClass</key>
     <string>AntinoteDockWidgetPlugin</string>
 </dict>

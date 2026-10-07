@@ -2,6 +2,13 @@ import Foundation
 import Testing
 @testable import VehlaStoreSDK
 
+@Test
+func documentedDockWidgetCapabilitiesDecodeInManifests() throws {
+    let data = Data(#"["persistentStorage","sharedContextRead","sharedContextPublish","appActions"]"#.utf8)
+    let capabilities = try JSONDecoder().decode([StoreCapability].self, from: data)
+    #expect(capabilities == [.persistentStorage, .sharedContextRead, .sharedContextPublish, .appActions])
+}
+
 private struct PreferenceFixture: Codable, Equatable {
     let count: Int
     let name: String
