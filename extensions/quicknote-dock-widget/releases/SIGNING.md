@@ -20,4 +20,4 @@ swift scripts/publisher-signing.swift verify \
   xkId/r9zdsMVHbZFc/p5OJCpiT8Ixn0Mg5boemVlQDH+QinVxr75gw7hj03SmiB/4UpU4p1AHgWIJh5E6P2ZAA==
 ```
 
-QuickNote 2.1.1 requires a new archive and signature from this publisher before Store catalog publication. The retained 1.1.1 archive is historical; its signed contents retain the old product identity. Renaming its filename does not change the archive bytes or make it a QuickNote release.
+QuickNote 2.1.2 requires a new archive and signature from this publisher before Store catalog publication. The retained 1.1.1 archive is historical; its signed contents retain the old product identity. Renaming its filename does not change the archive bytes or make it a QuickNote release.

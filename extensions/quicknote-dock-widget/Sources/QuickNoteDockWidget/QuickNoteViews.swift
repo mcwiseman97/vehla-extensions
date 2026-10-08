@@ -300,20 +300,26 @@ private struct PopupNoteView: View {
 
 private struct ImportNotesView: View {
     @ObservedObject var model: QuickNoteModel
+    private var primary: Color { Color(nsColor: model.editorTextColor) }
+    private var secondary: Color { Color(nsColor: model.theme?.secondaryTextColor ?? .secondaryLabelColor) }
+    private var accent: Color { Color(nsColor: model.theme?.accentColor ?? .controlAccentColor) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Import Notes", systemImage: "square.and.arrow.down").font(.system(size: 18, weight: .semibold))
+                Label("Import Notes", systemImage: "square.and.arrow.down").font(.system(size: 13, weight: .semibold))
+                Text("QUICKNOTE").font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(secondary)
                 Spacer()
                 Button("Done") { model.cancelImport() }.keyboardShortcut(.cancelAction)
             }
-            Text("Bring your scratch notes into Vehla.").foregroundStyle(.secondary)
+            Divider()
+            Text("Bring your scratch notes into Vehla.").font(.system(size: 12)).foregroundStyle(secondary)
             if model.importing { ProgressView("Looking for notes…").frame(maxWidth: .infinity, minHeight: 180) }
             else if let preview = model.importPreview {
                 Text(preview.message).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 if !preview.notes.isEmpty {
                     HStack {
-                        Text("\(preview.notes.count) notes · \(preview.source)").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("\(preview.notes.count) notes · \(preview.source)").font(.system(size: 11)).foregroundStyle(secondary)
                         Spacer()
                         Button("Select All") { model.importSelection = Set(preview.notes.filter { !model.library.importedKeys.contains($0.importKey ?? "") }.map(\.id)) }
                         Button("None") { model.importSelection = [] }
@@ -327,29 +333,42 @@ private struct ImportNotesView: View {
                                 })) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(note.title).lineLimit(1)
-                                        Text(imported ? "Already imported — local edits are preserved" : note.preview).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                                        Text(imported ? "Already imported — local edits are preserved" : note.preview).font(.system(size: 10)).foregroundStyle(secondary).lineLimit(1)
                                     }
                                 }.disabled(imported)
                             }
                         }.padding(8)
                     }.frame(minHeight: 140, maxHeight: 280)
                 }
-            } else { Text("No import is ready. Choose a backup or exported files below.").foregroundStyle(.secondary) }
+            } else { Text("No import is ready. Choose a backup or exported files below.").foregroundStyle(secondary) }
             if let status = model.status, model.statusIsError {
                 Text(status).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 Button("Open Full Disk Access Settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") { model.context?.open(url) }
                 }
             }
+            Divider()
             HStack {
                 Button("Choose Files…") { model.chooseImportFiles() }.disabled(model.importing)
                 Button("Scan Again") { model.beginImport() }.disabled(model.importing)
                 Spacer()
                 Button("Import \(model.importSelection.count) Notes") { model.confirmImport() }
-                    .buttonStyle(.borderedProminent).disabled(model.importing || model.importSelection.isEmpty || model.importPreview == nil)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                    .disabled(model.importing || model.importSelection.isEmpty || model.importPreview == nil)
             }
             Text("Accepts Antinote SQLite databases and backups, UTF-8 text, Markdown, and Vehla library JSON. Occupied slots import into the scratch stack.")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(24).frame(width: 580)
+                .font(.system(size: 10)).foregroundStyle(secondary)
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(primary)
+        .tint(accent)
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .padding(24).frame(width: 580)
+        .presentationBackground(.ultraThinMaterial)
+        .preferredColorScheme(model.theme.map { $0.isDark ? .dark : .light })
     }
 }

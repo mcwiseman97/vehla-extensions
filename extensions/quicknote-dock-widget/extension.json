@@ -2,7 +2,7 @@
   "apiVersion": 3,
   "id": "com.wiseman.vehla.quicknote",
   "name": "QuickNote",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "A native scratchpad with checklists, calculations, capture, permanent slots and safe Antinote import.",
   "author": "Michael Wiseman",
   "runtime": "dockWidget",
