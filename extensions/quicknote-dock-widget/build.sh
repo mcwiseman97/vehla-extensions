@@ -47,9 +47,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.1.0</string>
+    <string>2.1.1</string>
     <key>CFBundleVersion</key>
-    <string>21</string>
+    <string>22</string>
     <key>NSPrincipalClass</key>
     <string>QuickNoteDockWidgetPlugin</string>
 </dict>

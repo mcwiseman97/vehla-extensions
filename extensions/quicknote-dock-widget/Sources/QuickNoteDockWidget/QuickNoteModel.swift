@@ -41,6 +41,8 @@ final class QuickNoteModel: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
     private var analysisTask: Task<Void, Never>?
+    private var preloadTask: Task<Void, Never>?
+    private var presentations = ScratchPresentationStore()
     private var importTask: Task<Void, Never>?
     private var ocrTask: Task<Void, Never>?
     private var captureTask: Task<Void, Never>?
@@ -75,10 +77,20 @@ final class QuickNoteModel: ObservableObject {
         }
         guard loadTask == nil, let repository else { return }
         loading = true
+        let tools = tools
         loadTask = Task { [weak self] in
             do {
                 let state = try await repository.load()
+                let initial = state.notes.first { $0.id == state.selectedID && $0.deleted == nil }
+                    ?? state.notes.first { $0.deleted == nil }
+                let prepared: ScratchAnalysis?
+                if let initial { prepared = try await tools.analyze(initial.content) }
+                else { prepared = nil }
                 guard let self, !Task.isCancelled, !self.closed else { return }
+                if let initial, let prepared {
+                    self.presentations.insert(prepared, for: initial.id)
+                    self.analysis = prepared
+                }
                 self.library = state; self.savedRevision = state.revision; self.ready = true
                 let previous = self.library
                 self.library.expire()
@@ -92,7 +104,7 @@ final class QuickNoteModel: ObservableObject {
     func stop() {
         active = false
         stopCapture()
-        searchTask?.cancel(); analysisTask?.cancel(); importTask?.cancel(); ocrTask?.cancel()
+        searchTask?.cancel(); analysisTask?.cancel(); preloadTask?.cancel(); preloadTask = nil; importTask?.cancel(); ocrTask?.cancel()
         importing = false; importPreview = nil; importPresented = false
         // Accepted writes must drain even when the surface disappears.
         debounceTask?.cancel()
@@ -229,14 +241,45 @@ final class QuickNoteModel: ObservableObject {
 
     private func analyze() {
         analysisTask?.cancel()
+        preloadTask?.cancel(); preloadTask = nil
         guard active else { return }
+        guard let id = selectedID else { analysis = ScratchAnalysis(); return }
         let text = draft, tools = tools
+        if let cached = presentations.result(for: id, text: text) {
+            analysis = cached
+            warmPresentations()
+            return
+        }
         analysisTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .milliseconds(140))
                 let result = try await tools.analyze(text)
-                guard !Task.isCancelled else { return }; self?.analysis = result
+                guard let self, !Task.isCancelled, self.selectedID == id, self.draft == text else { return }
+                self.presentations.insert(result, for: id)
+                self.analysis = result
+                self.warmPresentations()
             } catch is CancellationError {} catch { self?.fail(error.localizedDescription) }
+        }
+    }
+
+    private func warmPresentations() {
+        guard active, preloadTask == nil else { return }
+        let snapshot = library.notes, tools = tools
+        preloadTask = Task(priority: .utility) { [weak self] in
+            defer { if !Task.isCancelled { self?.preloadTask = nil } }
+            do {
+                let notes = try await tools.warmCandidates(snapshot)
+                for note in notes {
+                    try Task.checkCancellation()
+                    guard let self, self.active else { return }
+                    if self.presentations.result(for: note.id, text: note.content) != nil { continue }
+                    let result = try await tools.analyze(note.content)
+                    try Task.checkCancellation()
+                    guard self.library.notes.contains(where: { $0.id == note.id && $0.content == note.content }) else { continue }
+                    self.presentations.insert(result, for: note.id)
+                    await Task.yield()
+                }
+            } catch { /* Preloading is optional; foreground analysis reports errors. */ }
         }
     }
 

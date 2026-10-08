@@ -61,7 +61,7 @@ struct InlineNoteEditor: NSViewRepresentable {
         textView.baseColor = textColor
         textView.string = text
         if analysis.source == textView.string { textView.mathAnalysis = analysis }
-        textView.restyle()
+        if !textView.restorePresentation(analysis) { textView.restyle() }
         textView.delegate = context.coordinator
         textView.onSave = onSave
         textView.onCommand = onCommand
@@ -117,9 +117,12 @@ struct InlineNoteEditor: NSViewRepresentable {
             textView.baseColor = textColor
             changed = true
         }
-        if changed { textView.restyle() }
+        if selectionChanged || changed {
+            if !textView.restorePresentation(analysis) { textView.restyle() }
+        }
         if analysis.source == textView.string && analysis != textView.mathAnalysis {
             textView.mathAnalysis = analysis
+            _ = textView.restorePresentation(analysis)
         }
     }
 }
@@ -388,6 +391,19 @@ final class InlineTextView: NSTextView {
     }
 
     // MARK: Checkboxes
+
+    /// Restore actor-prepared formatting in this same AppKit update, before a
+    /// frame can display the replacement note as unformatted text.
+    @discardableResult
+    func restorePresentation(_ analysis: ScratchAnalysis) -> Bool {
+        guard analysis.prepared, analysis.source == string else { return false }
+        styleTask?.cancel()
+        checkboxes = analysis.checkboxes
+        spans = analysis.spans
+        mathAnalysis = analysis
+        applyStyle()
+        return true
+    }
 
     func restyle() {
         styleTask?.cancel()
@@ -809,12 +825,12 @@ struct NoteSwipeTracker {
         }
         distanceX += x
         distanceY += y
-        if axis == .undecided, max(abs(distanceX), abs(distanceY)) >= 8 {
-            axis = abs(distanceX) > abs(distanceY) * 1.5 ? .horizontal : .vertical
+        if axis == .undecided, max(abs(distanceX), abs(distanceY)) >= 16 {
+            axis = abs(distanceX) > abs(distanceY) * 2 ? .horizontal : .vertical
         }
         if phase.contains(.ended) {
             tracking = false
-            if axis == .horizontal, abs(distanceX) >= 60 {
+            if axis == .horizontal, abs(distanceX) >= 120 {
                 return .navigate(distanceX > 0 ? 1 : -1)
             }
         }
@@ -823,7 +839,7 @@ struct NoteSwipeTracker {
 }
 
 
-struct ScratchTextSpan: Sendable {
+struct ScratchTextSpan: Equatable, Sendable {
     var range: NSRange
     var kind: String
     var url: URL?

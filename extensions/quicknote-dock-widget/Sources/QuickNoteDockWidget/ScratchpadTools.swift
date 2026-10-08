@@ -7,6 +7,10 @@ struct ScratchAnalysis: Equatable, Sendable {
     var summary = ""
     var source = ""
     var mathResults: [ScratchMathResult] = []
+    var checkboxes: [NoteCheckbox] = []
+    var spans: [ScratchTextSpan] = []
+    var prepared = false
+    var cacheCost = 0
 }
 
 struct ScratchMathResult: Equatable, Sendable {
@@ -84,6 +88,27 @@ actor ScratchTools {
                     result.mathResults.append(ScratchMathResult(range: range, answer: "Check expression"))
                 }
             }
+        }
+        result.checkboxes = NoteCheckbox.find(in: text)
+        result.spans = ScratchTextSpan.parse(text)
+        try Task.checkCancellation()
+        result.prepared = true
+        result.cacheCost = text.utf8.count + result.checkboxes.count * 96 + result.spans.count * 64
+            + result.mathResults.reduce(0) { $0 + $1.answer.utf8.count + 32 }
+        return result
+    }
+
+    /// Bound startup work as well as retained memory. Each note is analyzed in
+    /// a separate actor call so interactive work can cancel/yield between notes.
+    func warmCandidates(_ notes: [ScratchNote]) throws -> [ScratchNote] {
+        var cost = 0
+        var result: [ScratchNote] = []
+        for note in notes where note.deleted == nil {
+            try Task.checkCancellation()
+            let size = note.content.utf8.count
+            guard result.count < ScratchPresentationStore.noteLimit else { break }
+            if cost + size > ScratchPresentationStore.byteLimit / 2 { continue }
+            cost += size; result.append(note)
         }
         return result
     }
@@ -213,5 +238,34 @@ struct ScratchTimerCommand: Equatable, Sendable {
         } else { duration = Double(body).map { $0 * 60 } }
         guard let duration, duration > 0, duration <= 7 * 86_400 else { return nil }
         return Self(duration: duration, label: label)
+    }
+}
+
+
+/// UI-side projection of actor-produced results. No parsing or hashing of note
+/// bodies occurs here. Derived state is intentionally not written to disk.
+struct ScratchPresentationStore {
+    static let noteLimit = 128
+    static let byteLimit = 16 * 1_024 * 1_024
+    private var entries: [String: ScratchAnalysis] = [:]
+    private var order: [String] = []
+    private(set) var cost = 0
+    var count: Int { entries.count }
+
+    mutating func result(for id: String, text: String) -> ScratchAnalysis? {
+        guard let result = entries[id], result.source == text else { return nil }
+        order.removeAll { $0 == id }; order.append(id)
+        return result
+    }
+
+    mutating func insert(_ result: ScratchAnalysis, for id: String) {
+        if let previous = entries.removeValue(forKey: id) { cost -= previous.cacheCost }
+        order.removeAll { $0 == id }
+        guard result.prepared, result.cacheCost <= Self.byteLimit else { return }
+        entries[id] = result; order.append(id); cost += result.cacheCost
+        while entries.count > Self.noteLimit || cost > Self.byteLimit {
+            let oldest = order.removeFirst()
+            if let evicted = entries.removeValue(forKey: oldest) { cost -= evicted.cacheCost }
+        }
     }
 }

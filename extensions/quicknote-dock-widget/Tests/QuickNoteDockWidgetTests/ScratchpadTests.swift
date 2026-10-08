@@ -109,6 +109,22 @@ import VehlaDockWidgetSDK
         #expect(state.notes[0].content == "Temporary")
         #expect(state.notes[1].deleted == nil)
     }
+    @Test func presentationCacheBoundsMemoryAndRejectsChangedContent() {
+        var cache = ScratchPresentationStore()
+        for index in 0..<140 {
+            cache.insert(ScratchAnalysis(source: "note", prepared: true, cacheCost: 1), for: "\(index)")
+        }
+        #expect(cache.count == ScratchPresentationStore.noteLimit)
+        #expect(cache.result(for: "0", text: "note") == nil)
+        #expect(cache.result(for: "139", text: "edited") == nil)
+        #expect(cache.result(for: "139", text: "note") != nil)
+        cache.insert(ScratchAnalysis(source: "large", prepared: true, cacheCost: ScratchPresentationStore.byteLimit), for: "large")
+        #expect(cache.count == 1)
+        #expect(cache.cost == ScratchPresentationStore.byteLimit)
+        cache.insert(ScratchAnalysis(source: "too big", prepared: true, cacheCost: ScratchPresentationStore.byteLimit + 1), for: "large")
+        #expect(cache.count == 0)
+        #expect(cache.cost == 0)
+    }
     @Test func calculationsVariablesUnitsAndInvalidExpressions() async throws {
         var parser = MathParser("100 + 15%")
         #expect(try parser.evaluate() == 115)
@@ -311,14 +327,67 @@ import VehlaDockWidgetSDK
     @Test func twoFingerNavigationCommitsOnceAndIgnoresMomentum() {
         var tracker = NoteSwipeTracker()
         #expect(tracker.step(x: 0, y: 0, phase: .began) == .passThrough)
-        #expect(tracker.step(x: 35, y: 2, phase: .changed) == .consume)
-        #expect(tracker.step(x: 40, y: 1, phase: .changed) == .consume)
+        #expect(tracker.step(x: 70, y: 2, phase: .changed) == .consume)
+        #expect(tracker.step(x: 70, y: 1, phase: .changed) == .consume)
         #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(1))
         #expect(tracker.step(x: 100, y: 0, phase: [], momentum: .began) == .consume)
         #expect(tracker.step(x: 0, y: 0, phase: .ended) != .navigate(1))
         _ = tracker.step(x: 0, y: 0, phase: .began)
-        _ = tracker.step(x: -75, y: 0, phase: .changed)
+        _ = tracker.step(x: -140, y: 0, phase: .changed)
         #expect(tracker.step(x: 0, y: 0, phase: .ended) == .navigate(-1))
+    }
+
+    @Test func navigationRequiresDeliberateHorizontalTravel() {
+        for distance in [60.0, 75.0, 110.0] {
+            var tracker = NoteSwipeTracker()
+            _ = tracker.step(x: 0, y: 0, phase: .began)
+            _ = tracker.step(x: distance, y: 0, phase: .changed)
+            #expect(tracker.step(x: 0, y: 0, phase: .ended) == .consume)
+        }
+        var diagonal = NoteSwipeTracker()
+        _ = diagonal.step(x: 0, y: 0, phase: .began)
+        #expect(diagonal.step(x: 18, y: 10, phase: .changed) == .passThrough)
+        _ = diagonal.step(x: 150, y: 0, phase: .changed)
+        #expect(diagonal.step(x: 0, y: 0, phase: .ended) == .passThrough)
+    }
+
+    @Test func unchangedNotesRestoreMathAndFormattingImmediately() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let math = ScratchNote(content: "math\ncoffee = 4.5\ncoffee * 6 =")
+        let list = ScratchNote(content: "list: Shopping\nMilk\n[x] Bread\n**Remember**")
+        try await ScratchRepository(root: root).save(ScratchLibrary(notes: [math, list], selectedID: math.id))
+        let theme = VehlaDockWidgetTheme(isDark: false, accentColor: .systemBlue, primaryTextColor: .labelColor,
+            secondaryTextColor: .secondaryLabelColor, surfaceColor: .windowBackgroundColor)
+        let context = VehlaDockWidgetContext(packageID: "test", widgetID: "quicknote", dataDirectory: root,
+            theme: theme, invalidationHandler: {}, actionHandler: { _ in })
+        let model = QuickNoteModel(); model.configure(context)
+        try await waitReady(model)
+        #expect(model.analysis.prepared)
+        #expect(model.analysis.source == math.content)
+        // Wait for background warming once, then require synchronous restoration.
+        try await Task.sleep(for: .milliseconds(350))
+        model.select(list.id)
+        #expect(model.analysis.source == list.content)
+        let editor = InlineTextView(usingTextLayoutManager: false)
+        editor.string = list.content
+        #expect(editor.restorePresentation(model.analysis))
+        #expect(editor.checkboxes.count == 3)
+        let boldRange = (editor.string as NSString).range(of: "Remember")
+        let font = try #require(editor.textStorage?.attribute(.font, at: boldRange.location, effectiveRange: nil) as? NSFont)
+        #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
+        model.select(math.id)
+        #expect(model.analysis.source == math.content)
+        #expect(model.analysis.mathResults.map(\.answer) == ["4.5", "27"])
+        model.stop(); model.start()
+        #expect(model.analysis.mathResults.map(\.answer) == ["4.5", "27"])
+        model.inlineEdited("math\ncoffee = 10\ncoffee * 6 =")
+        model.select(list.id)
+        #expect(model.analysis.source == list.content)
+        try await Task.sleep(for: .milliseconds(350))
+        model.select(math.id)
+        #expect(model.analysis.mathResults.map(\.answer) == ["10", "60"])
+        editor.detach(); model.close()
     }
 
     @Test func verticalShortCancelledAndMouseGesturesDoNotNavigate() {
